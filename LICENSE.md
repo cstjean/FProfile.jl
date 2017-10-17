@@ -1,4 +1,4 @@
-The FunctionalProfile.jl package is licensed under the MIT "Expat" License:
+The FProfile.jl package is licensed under the MIT "Expat" License:
 
 > Copyright (c) 2017: Cedric St-Jean.
 > 
