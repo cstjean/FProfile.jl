@@ -67,6 +67,7 @@ struct Node
     children::Vector{Node}
 end
 Base.getindex(node::Node, i::Int) = node.children[i]
+Base.getindex(node::Node, i::Int, args...) = node[i][args...]
 
 function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int)
     nindent = min(cols>>1, level)
@@ -212,7 +213,7 @@ function tree(data::Vector{UInt64}, lidict::LineInfoFlatDict, fmt::ProfileFormat
     level = 0
     len = Int[length(x) for x in bt]
     keep = len .> 0
-    # Using UNKNOWN as the root works, but we should have a different flag value...
+    # Using UNKNOWN as the root works, but it should ideally be a different flag value...
     # Or use a Nullable. - @cstjean
     return Node(UNKNOWN, -1, 0, tree(bt[keep], counts[keep], lidict, level, fmt, 0))
 end
