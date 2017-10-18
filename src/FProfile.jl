@@ -59,6 +59,12 @@ end
 
 ################################################################################
 
+struct Node
+    lilist
+    n
+    level
+    children::Vector
+end
 
 function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
               lidict::LineInfoFlatDict, level::Int, fmt::ProfileFormat, noisefloor::Int)
@@ -122,23 +128,21 @@ function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
         group = group[p]
         n = n[p]
     end
-    # Generate the string for each line
-    strs = Profile.tree_format(lilist, n, level, 80)
     # Recurse to the next level
     len = Int[length(x) for x in bt]
     out = []
     for i = 1:length(lilist)
         n[i] < fmt.mincount && continue
         n[i] < noisefloor && continue
-        if !isempty(strs[i])
-            println(strs[i])
-        end
         idx = group[i]
         keep = len[idx] .> level+1
         if any(keep)
             idx = idx[keep]
-            push!(out, tree(bt[idx], counts[idx], lidict, level + 1, fmt, fmt.noisefloor > 0 ? floor(Int, fmt.noisefloor * sqrt(n[i])) : 0))
+            sub = tree(bt[idx], counts[idx], lidict, level + 1, fmt, fmt.noisefloor > 0 ? floor(Int, fmt.noisefloor * sqrt(n[i])) : 0)
+        else
+            sub = []
         end
+        push!(out, Node(lilist, n, level, sub))
     end
     return out
 end
