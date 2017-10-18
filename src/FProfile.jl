@@ -8,7 +8,8 @@ export @fprofile, backtraces, tree
 
 using Base: Profile
 using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
-    tree_aggregate, flatten, purgeC
+    tree_aggregate, flatten, purgeC, tree_format, UNKNOWN, show_spec_linfo,
+    rtruncto, ltruncto
 
 restructure_data(data, lidict) = Profile.flatten(data, lidict)
 traces(data, lidict::Dict) = [[lidict[p] for p in fdata[a:b]]
@@ -60,10 +61,68 @@ end
 ################################################################################
 
 struct Node
-    lilist
-    n
-    level
-    children::Vector
+    li::StackFrame
+    n::Int
+    level::Int
+    children::Vector{Node}
+end
+Base.getindex(node::Node, i::Int) = node.children[i]
+
+function my_tree_format(li::StackFrame, count::Int, level::Int, cols::Int)
+    nindent = min(cols>>1, level)
+    # These two lines were simplified for FProfile, FIXME with IOContext? - @cstjean
+    ndigcounts = ndigits(count)
+    ndigline = Base.Profile.tree_format_linewidth(li)
+    ntext = cols - nindent - ndigcounts - ndigline - 5
+    widthfile = floor(Integer, 0.4ntext)
+    widthfunc = floor(Integer, 0.6ntext)
+    showextra = false
+    if level > nindent
+        nextra = level - nindent
+        nindent -= ndigits(nextra) + 2
+        showextra = true
+    end
+    if li != UNKNOWN
+        base = " "^nindent
+        if showextra
+            base = string(base, "+", nextra, " ")
+        end
+        if li.line == li.pointer
+            str = string(base,
+                         rpad(string(count), ndigcounts, " "),
+                         " ",
+                         "unknown function (pointer: 0x",
+                         hex(li.pointer,2*sizeof(Ptr{Void})),
+                         ")")
+        else
+            fname = string(li.func)
+            if !li.from_c && !isnull(li.linfo)
+                fname = sprint(show_spec_linfo, li)
+            end
+            str = string(base,
+                         rpad(string(count), ndigcounts, " "),
+                         " ",
+                         rtruncto(string(li.file), widthfile),
+                         ":",
+                         li.line == -1 ? "?" : string(li.line),
+                         "; ",
+                         ltruncto(fname, widthfunc))
+        end
+    else
+        str = ""
+    end
+    return str
+end
+
+function Base.show(io::IO, node::Node)
+    cols::Int = Base.displaysize(io)[2]
+    # @show length(tree_format(node.lilist, node.n, node.level, cols))
+    # @show length(node.children)
+    str = my_tree_format(node.li, node.n, node.level, cols)
+    if !isempty(str) println(io, str) end
+    for c in node.children
+        show(io, c)
+    end
 end
 
 function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
@@ -130,7 +189,7 @@ function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
     end
     # Recurse to the next level
     len = Int[length(x) for x in bt]
-    out = []
+    out = Node[]
     for i = 1:length(lilist)
         n[i] < fmt.mincount && continue
         n[i] < noisefloor && continue
@@ -138,11 +197,11 @@ function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
         keep = len[idx] .> level+1
         if any(keep)
             idx = idx[keep]
-            sub = tree(bt[idx], counts[idx], lidict, level + 1, fmt, fmt.noisefloor > 0 ? floor(Int, fmt.noisefloor * sqrt(n[i])) : 0)
+            children = tree(bt[idx], counts[idx], lidict, level + 1, fmt, fmt.noisefloor > 0 ? floor(Int, fmt.noisefloor * sqrt(n[i])) : 0)
         else
-            sub = []
+            children = []
         end
-        push!(out, Node(lilist, n, level, sub))
+        push!(out, Node(lilist[i], n[i], level, children))
     end
     return out
 end
@@ -155,7 +214,9 @@ function tree(data::Vector{UInt64}, lidict::LineInfoFlatDict, fmt::ProfileFormat
     level = 0
     len = Int[length(x) for x in bt]
     keep = len .> 0
-    return tree(bt[keep], counts[keep], lidict, level, fmt, 0)
+    # Using UNKNOWN as the root works, but we should have a different flag value...
+    # Or use a Nullable. - @cstjean
+    return Node(UNKNOWN, -1, 0, tree(bt[keep], counts[keep], lidict, level, fmt, 0))
 end
 
 function tree(data::Vector, lidict::LineInfoDict, fmt::ProfileFormat)
