@@ -68,7 +68,7 @@ struct Node
 end
 Base.getindex(node::Node, i::Int) = node.children[i]
 
-function my_tree_format(li::StackFrame, count::Int, level::Int, cols::Int)
+function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int)
     nindent = min(cols>>1, level)
     # These two lines were simplified for FProfile, FIXME with IOContext? - @cstjean
     ndigcounts = ndigits(count)
@@ -116,9 +116,7 @@ end
 
 function Base.show(io::IO, node::Node)
     cols::Int = Base.displaysize(io)[2]
-    # @show length(tree_format(node.lilist, node.n, node.level, cols))
-    # @show length(node.children)
-    str = my_tree_format(node.li, node.n, node.level, cols)
+    str = tree_format(node.li, node.n, node.level, cols)
     if !isempty(str) println(io, str) end
     for c in node.children
         show(io, c)
