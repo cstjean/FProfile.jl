@@ -9,7 +9,7 @@ export @fprofile, backtraces, tree
 using Base: Profile
 using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
     tree_aggregate, flatten, purgeC, tree_format, UNKNOWN, show_spec_linfo,
-    rtruncto, ltruncto
+    rtruncto, ltruncto, tree_format_linewidth
 
 restructure_data(data, lidict) = Profile.flatten(data, lidict)
 traces(data, lidict::Dict) = [[lidict[p] for p in fdata[a:b]]
@@ -68,11 +68,9 @@ end
 Base.getindex(node::Node, i::Int) = node.children[i]
 Base.getindex(node::Node, i::Int, args...) = node[i][args...]
 
-function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int)
+function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int,
+                             ndigcounts::Int, ndigline::Int)
     nindent = min(cols>>1, level)
-    # These two lines were simplified for FProfile, FIXME with IOContext? - @cstjean
-    ndigcounts = ndigits(count)
-    ndigline = Base.Profile.tree_format_linewidth(li)
     ntext = cols - nindent - ndigcounts - ndigline - 5
     widthfile = floor(Integer, 0.4ntext)
     widthfunc = floor(Integer, 0.6ntext)
@@ -117,10 +115,20 @@ end
 function Base.show(io::IO, node::Node)
     cols::Int = Base.displaysize(io)[2]
     level = get(io, :profile_tree_level, 0)
-    str = tree_format(node.li, node.count, level, cols)
+    str = tree_format(node.li, node.count, level, cols,
+                      get(io, :profile_ndigcounts, ndigits(node.count)),
+                      get(io, :profile_ndigline, tree_format_linewidth(node.li)))
     if !isempty(str) println(io, str) end
-    for c in node.children
-        show(IOContext(io, profile_tree_level=level+1), c)
+    if !isempty(node.children)
+        io2 = IOContext(io,
+                        profile_tree_level=level+1,
+                        profile_ndigcounts=maximum(ndigits(child.count)
+                                                   for child in node.children),
+                        profile_ndigline=maximum(tree_format_linewidth(child.li)
+                                                 for child in node.children))
+        for c in node.children
+            show(io2, c)
+        end
     end
 end
 
