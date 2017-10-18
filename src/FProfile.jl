@@ -62,8 +62,7 @@ end
 
 struct Node
     li::StackFrame
-    n::Int
-    level::Int
+    count::Int
     children::Vector{Node}
 end
 Base.getindex(node::Node, i::Int) = node.children[i]
@@ -117,10 +116,11 @@ end
 
 function Base.show(io::IO, node::Node)
     cols::Int = Base.displaysize(io)[2]
-    str = tree_format(node.li, node.n, node.level, cols)
+    level = get(io, :profile_tree_level, 0)
+    str = tree_format(node.li, node.count, level, cols)
     if !isempty(str) println(io, str) end
     for c in node.children
-        show(io, c)
+        show(IOContext(io, profile_tree_level=level+1), c)
     end
 end
 
@@ -200,7 +200,7 @@ function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
         else
             children = []
         end
-        push!(out, Node(lilist[i], n[i], level, children))
+        push!(out, Node(lilist[i], n[i], children))
     end
     return out
 end
@@ -215,7 +215,7 @@ function tree(data::Vector{UInt64}, lidict::LineInfoFlatDict, fmt::ProfileFormat
     keep = len .> 0
     # Using UNKNOWN as the root works, but it should ideally be a different flag value...
     # Or use a Nullable. - @cstjean
-    return Node(UNKNOWN, -1, 0, tree(bt[keep], counts[keep], lidict, level, fmt, 0))
+    return Node(UNKNOWN, -1, tree(bt[keep], counts[keep], lidict, level, fmt, 0))
 end
 
 function tree(data::Vector, lidict::LineInfoDict, fmt::ProfileFormat)
