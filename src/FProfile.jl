@@ -17,9 +17,6 @@ using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
 using DataFrames
 using DataStructures: OrderedDict
 
-restructure_data(data, lidict) = Profile.flatten(data, lidict)
-traces(data, lidict::Dict) = [[lidict[p] for p in fdata[a:b]]
-                              for (a, b) in zip([1;breaks[1:end-1]+1], breaks.-1)]
 
 struct ProfileData  # a mere container for Base.Profile data
     data::Vector
