@@ -2,14 +2,20 @@
 # That code is intentionally kept very similar to facilitate porting over any
 # change to the original.
 
+# ip = instruction pointer 
+# li = line-info
+
 module FProfile
 
-export @fprofile, backtraces, tree
+export @fprofile, backtraces, tree, flat
 
 using Base: Profile
+using Base.Core: MethodInstance
 using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
     tree_aggregate, flatten, purgeC, tree_format, UNKNOWN, show_spec_linfo,
-    rtruncto, ltruncto, tree_format_linewidth
+    rtruncto, ltruncto, tree_format_linewidth, count_flat, parse_flat, flatten
+using DataFrames
+using DataStructures: OrderedDict
 
 restructure_data(data, lidict) = Profile.flatten(data, lidict)
 traces(data, lidict::Dict) = [[lidict[p] for p in fdata[a:b]]
@@ -22,6 +28,7 @@ end
 ProfileData() = ProfileData(Profile.retrieve()...)
 Base.show(io::IO, pd::ProfileData) =
     write(io, "ProfileData($(length(backtraces(pd))) backtraces)")
+Profile.print(pd::ProfileData; kwargs...) = Profile.print(pd.data, pd.lidict; kwargs...)
 
 """ `@fprofile(expr, delay=0.001, n=1000000)` profiles the execution of `expr`, taking a
 snapshot (backtrace) every `delay` seconds (up to `n` backtraces). It returns the
@@ -236,16 +243,72 @@ function tree(pd::ProfileData;
               combine = true,
               maxdepth::Int = typemax(Int),
               mincount::Int = 0,
-              noisefloor = 0,
-              sortedby::Symbol = :filefuncline)
+              noisefloor = 0)
     tree(pd.data, pd.lidict, ProfileFormat(C = C,
             combine = combine,
             maxdepth = maxdepth,
             mincount = mincount,
-            noisefloor = noisefloor,
-            sortedby = sortedby))
-         
+            noisefloor = noisefloor))
 end
+
+################################################################################
+
+missing_info() = nothing
+missing_info()  # call it to generate a specialization
+const missing_info_method_instance = let res=nothing
+    Base.visit(spec->(res=spec;), methods(missing_info).ms[1].specializations)
+    res
+end
+
+
+get_line(sf::StackFrame) = sf.line
+get_file(sf::StackFrame) = sf.file
+get_specialization(sf::StackFrame) = get(sf.linfo, missing_info_method_instance)
+get_method(mi::MethodInstance) = mi.def
+get_method(sf::StackFrame) = get_method(get_specialization(sf))
+function get_function(met::Method)
+    ftype = fieldtype(met.sig, 1)
+    return isdefined(ftype, :instance) ? ftype.instance : missing_info
+end
+get_function(sf::StackFrame) = get_function(get_method(sf))
+get_module(met::Method) = met.module
+get_module(sf::StackFrame) = get_module(get_method(sf))
+
+function flat(data::Vector, lidict::LineInfoFlatDict, fmt::ProfileFormat)
+    if !fmt.C
+        data = purgeC(data, lidict)
+    end
+    iplist, n = count_flat(data)
+    lilist, n = parse_flat(iplist, n, lidict, fmt.C)
+    df = DataFrame(OrderedDict(:count=>n,
+                               :stackframe=>lilist,
+                               :line=>map(get_line, lilist),
+                               :file=>map(get_file, lilist),
+                               :specialization=>map(get_specialization, lilist),
+                               :method=>map(get_method, lilist),
+                               :function=>map(get_function, lilist),
+                               :module=>map(get_module, lilist)))
+    return sort(df, cols=:count, rev=true)
+end
+
+function flat(data::Vector, lidict::LineInfoDict, fmt::ProfileFormat)
+    newdata, newdict = flatten(data, lidict)
+    return flat(newdata, newdict, fmt)
+end
+
+function flat(pd::ProfileData;
+              C = false,
+              combine = true,
+              maxdepth::Int = typemax(Int),
+              mincount::Int = 0,
+              noisefloor = 0)
+    flat(pd.data, pd.lidict, ProfileFormat(C = C,
+            combine = combine,
+            maxdepth = maxdepth,
+            mincount = mincount,
+            noisefloor = noisefloor))
+end
+
 
 
 end # module
