@@ -1,6 +1,4 @@
 # This file contains several functions derived from Julia's profile.jl
-# That code is intentionally kept very similar to facilitate porting over any
-# change to the original.
 
 # ip = instruction pointer 
 # li = line-info
@@ -259,6 +257,7 @@ end
 
 pop1!(acc::Accumulator, k) = push!(acc, k, -1) # cf. DataStructures#285
 
+# These functions are not very useful anymore.
 function accumulated_counts!(encountered::Accumulator, counts::Dict, node::Node,
                              key::Function)
     k = key(node.li)::Any
@@ -280,21 +279,28 @@ end
 
 # -----------------------------------------------------------------------------
 
-function accumulated_counts_from_traces(pd::ProfileData, key::Function)
+function counts_from_traces(backtraces::Vector, key::Function,
+                            encountered_key::Function=key)
     counts = Dict()
-    encountered = Set{StackFrame}()
-    for (trace_count, trace) in backtraces(pd; flatten=true)
+    encountered = Set()
+    for (trace_count, trace) in backtraces
         empty!(encountered)
         for sf in trace
-            k = key(sf)
-            if !(k in encountered)
-                push!(encountered, k)
+            ek = encountered_key(sf)
+            if !(ek in encountered)
+                push!(encountered, ek)
+                k = key(sf)
                 counts[k] = get(counts, k, 0) + trace_count
             end
         end
     end
     return counts
 end
+
+end_counts_from_traces(backtraces::Vector, key::Function,
+                       encountered_key::Function) =
+    counts_from_traces([(c, reverse(trace)) for (c, trace) in backtraces],
+                       key, encountered_key)
 
 
 # -----------------------------------------------------------------------------
@@ -320,18 +326,22 @@ get_function(sf::StackFrame) = get_function(get_method(sf))
 get_module(met::Method) = met.module
 get_module(sf::StackFrame) = get_module(get_method(sf))
 
+is_C(sf::StackFrame) = sf.from_c
+
 function flat(pd::ProfileData, data::Vector, lidict::LineInfoFlatDict, fmt::ProfileFormat)
-    if !fmt.C
-        data = purgeC(data, lidict)
-    end
-    iplist, n = count_flat(data)
-    lilist, n = parse_flat(iplist, n, lidict, fmt.C)
-    #count_dict = accumulated_counts(tree(pd), identity)
-    count_dict = accumulated_counts_from_traces(pd, identity)
+    # if !fmt.C
+    #     pd = purgeC(pd)
+    # end
+    # iplist, n = count_flat(data)
+    # lilist, n = parse_flat(iplist, n, lidict, fmt.C)
+    #count_dict = counts(tree(pd), identity)
+    btraces = backtraces(pd; flatten=true)
+    count_dict = counts_from_traces(btraces, identity)
+    end_count_dict = end_counts_from_traces(btraces, identity, get_module)
     lilist = collect(keys(count_dict))
     df = DataFrame(OrderedDict(#:count=>n,
                                :count=>[count_dict[sf] for sf in lilist],
-                               #:count=>[count_dict2[sf] for sf in lilist],
+                               :end_count=>[get(end_count_dict, sf, 0) for sf in lilist],
                                :stackframe=>lilist,
                                :line=>map(get_line, lilist),
                                :file=>map(get_file, lilist),
