@@ -336,24 +336,30 @@ function flat(pd::ProfileData;
               combine = true,
               maxdepth::Int = typemax(Int),
               mincount::Int = 0,
-              noisefloor = 0)
+              noisefloor = 0,
+              # internal parameter
+              _module=nothing)
     btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, identity)
-    end_count_dict = end_counts_from_traces(btraces, identity, get_module)
     lilist = collect(keys(count_dict))
-    df = DataFrame(OrderedDict(#:count=>n,
-                               :count=>[count_dict[sf] for sf in lilist],
-                               :end_count=>[get(end_count_dict, sf, 0) for sf in lilist],
-                               :stackframe=>lilist,
-                               :line=>map(get_line, lilist),
-                               :file=>map(get_file, lilist),
-                               :specialization=>map(get_specialization, lilist),
-                               :method=>map(get_method, lilist),
-                               :function=>map(get_function, lilist),
-                               :module=>map(get_module, lilist)))
+    cols = [:count=>[count_dict[sf] for sf in lilist],
+            :stackframe=>lilist,
+            :line=>map(get_line, lilist),
+            :file=>map(get_file, lilist),
+            :specialization=>map(get_specialization, lilist),
+            :method=>map(get_method, lilist),
+            :function=>map(get_function, lilist),
+            :module=>map(get_module, lilist)]
+    if _module !== nothing
+        end_count_dict = end_counts_from_traces(btraces, identity, get_module)
+        insert!(cols, 2, :end_count=>[get(end_count_dict, sf, 0) for sf in lilist])
+    end
+    df = DataFrame(OrderedDict(cols...))
+    if _module !== nothing; df = df[df[:module] .=== _module, :] end
     return sort(df, cols=:count, rev=true)
 end
 
-
+flat(pd::ProfileData, _module::Module; kwargs...) = 
+    flat(pd; kwargs..., _module=_module)
 
 end # module
