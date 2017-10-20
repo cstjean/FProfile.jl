@@ -332,9 +332,18 @@ get_stackframe(sf::StackFrame) = sf
 
 is_C_call(sf::StackFrame) = sf.from_c
 
+symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
+                              :line=>get_line,
+                              :file=>get_file,
+                              :specialization=>get_specialization,
+                              :method=>get_method,
+                              :function=>get_function,
+                              :module=>get_module)
+
 function flat(pd::ProfileData;
               C = false,
               combine = true,
+              combineby = :stackframe,
               maxdepth::Int = typemax(Int),
               mincount::Int = 0,
               noisefloor = 0,
@@ -342,7 +351,7 @@ function flat(pd::ProfileData;
               # internal parameter
               _module=nothing)
     btraces = backtraces(pd; flatten=true, C=C)
-    count_dict = counts_from_traces(btraces, identity)
+    count_dict = counts_from_traces(btraces, symbol2accessor[combineby])
     keys = collect(Base.keys(count_dict))
     @assert !isempty(keys) "ProfileData contains no applicable traces"
     ntrace = sum(first, btraces)
@@ -354,15 +363,9 @@ function flat(pd::ProfileData;
         end_count_dict = end_counts_from_traces(btraces, identity, get_module)
         push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
     end
-    feat_cols = [:stackframe=>get_stackframe,
-                 :line=>get_line,
-                 :file=>get_file,
-                 :specialization=>get_specialization,
-                 :method=>get_method,
-                 :function=>get_function,
-                 :module=>get_module]
     df = DataFrame(OrderedDict(count_cols...,
-                               [col=>map(f, keys) for (col, f) in feat_cols]...))
+                               [col=>map(f, keys) for (col, f) in symbol2accessor
+                                if method_exists(f, (typeof(first(keys)),))]...))
     if _module !== nothing; df = df[df[:module] .=== _module, :] end
     return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
