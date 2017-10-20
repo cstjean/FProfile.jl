@@ -15,7 +15,7 @@ using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
     tree_aggregate, flatten, purgeC, tree_format, UNKNOWN, show_spec_linfo,
     rtruncto, ltruncto, tree_format_linewidth, count_flat, parse_flat, flatten
 using DataFrames
-using DataStructures: OrderedDict
+using DataStructures: OrderedDict, Accumulator, counter
 
 
 struct ProfileData  # a mere container for Base.Profile data
@@ -23,8 +23,9 @@ struct ProfileData  # a mere container for Base.Profile data
     lidict::Profile.LineInfoDict
 end
 ProfileData() = ProfileData(Profile.retrieve()...)
+Base.length(pd::ProfileData) = sum(first, backtraces(pd))
 Base.show(io::IO, pd::ProfileData) =
-    write(io, "ProfileData($(length(backtraces(pd))) backtraces)")
+    write(io, "ProfileData($(length(pd)) backtraces)")
 Profile.print(pd::ProfileData; kwargs...) = Profile.print(pd.data, pd.lidict; kwargs...)
 
 """ `@fprofile(expr, delay=0.001, n=1000000)` profiles the execution of `expr`, taking a
@@ -55,11 +56,17 @@ end
 
 ################################################################################
 
-""" `backtraces(pd::ProfileData)` returns a vector of backtraces, each of which is a
-`Vector{Vector{StackFrame}}`. """
-function backtraces(pd::ProfileData)
-    data2, counts = Profile.tree_aggregate(pd.data)
-    return [Vector{StackFrame}[pd.lidict[d] for d in backtrace] for backtrace in data2]
+""" `backtraces(pd::ProfileData)` returns a vector of `(count, backtrace)`, where
+`backtrace` is a `Vector{Vector{StackFrame}}` which occurred `count` times during
+the profiler run. """
+function backtraces(pd::ProfileData; flatten=true)
+    data, lidict = pd.data, pd.lidict
+    if flatten
+        data, lidict = Profile.flatten(data, lidict)
+    end
+    data, counts = Profile.tree_aggregate(data)
+    return [(count, [lidict[d] for d in backtrace])
+            for (count, backtrace) in zip(counts, data)]
 end
 
 ################################################################################
@@ -250,6 +257,48 @@ end
 
 ################################################################################
 
+pop1!(acc::Accumulator, k) = push!(acc, k, -1) # cf. DataStructures#285
+
+function accumulated_counts!(encountered::Accumulator, counts::Dict, node::Node,
+                             key::Function)
+    k = key(node.li)::Any
+    if encountered[k] == 0
+        counts[k] = get(counts, k, 0) + node.count
+    end
+    push!(encountered, k)
+    for child in node.children
+        accumulated_counts!(encountered, counts, child, key)
+    end
+    pop1!(encountered, k)
+end
+
+function accumulated_counts(node::Node, key::Function)
+    d = Dict()
+    accumulated_counts!(counter(Any), d, node, key)
+    d
+end
+
+# -----------------------------------------------------------------------------
+
+function accumulated_counts_from_traces(pd::ProfileData, key::Function)
+    counts = Dict()
+    encountered = Set{StackFrame}()
+    for (trace_count, trace) in backtraces(pd; flatten=true)
+        empty!(encountered)
+        for sf in trace
+            k = key(sf)
+            if !(k in encountered)
+                push!(encountered, k)
+                counts[k] = get(counts, k, 0) + trace_count
+            end
+        end
+    end
+    return counts
+end
+
+
+# -----------------------------------------------------------------------------
+
 missing_info() = nothing
 missing_info()  # call it to generate a specialization
 const missing_info_method_instance = let res=nothing
@@ -271,13 +320,18 @@ get_function(sf::StackFrame) = get_function(get_method(sf))
 get_module(met::Method) = met.module
 get_module(sf::StackFrame) = get_module(get_method(sf))
 
-function flat(data::Vector, lidict::LineInfoFlatDict, fmt::ProfileFormat)
+function flat(pd::ProfileData, data::Vector, lidict::LineInfoFlatDict, fmt::ProfileFormat)
     if !fmt.C
         data = purgeC(data, lidict)
     end
     iplist, n = count_flat(data)
     lilist, n = parse_flat(iplist, n, lidict, fmt.C)
-    df = DataFrame(OrderedDict(:count=>n,
+    #count_dict = accumulated_counts(tree(pd), identity)
+    count_dict = accumulated_counts_from_traces(pd, identity)
+    lilist = collect(keys(count_dict))
+    df = DataFrame(OrderedDict(#:count=>n,
+                               :count=>[count_dict[sf] for sf in lilist],
+                               #:count=>[count_dict2[sf] for sf in lilist],
                                :stackframe=>lilist,
                                :line=>map(get_line, lilist),
                                :file=>map(get_file, lilist),
@@ -288,9 +342,9 @@ function flat(data::Vector, lidict::LineInfoFlatDict, fmt::ProfileFormat)
     return sort(df, cols=:count, rev=true)
 end
 
-function flat(data::Vector, lidict::LineInfoDict, fmt::ProfileFormat)
-    newdata, newdict = flatten(data, lidict)
-    return flat(newdata, newdict, fmt)
+function flat(pd::ProfileData, fmt::ProfileFormat)
+    newdata, newdict = flatten(pd.data, pd.lidict)
+    return flat(pd, newdata, newdict, fmt)
 end
 
 function flat(pd::ProfileData;
@@ -299,7 +353,7 @@ function flat(pd::ProfileData;
               maxdepth::Int = typemax(Int),
               mincount::Int = 0,
               noisefloor = 0)
-    flat(pd.data, pd.lidict, ProfileFormat(C = C,
+    flat(pd, ProfileFormat(C = C,
             combine = combine,
             maxdepth = maxdepth,
             mincount = mincount,
