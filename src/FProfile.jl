@@ -337,12 +337,17 @@ function flat(pd::ProfileData;
               maxdepth::Int = typemax(Int),
               mincount::Int = 0,
               noisefloor = 0,
+              percent = true,
               # internal parameter
               _module=nothing)
     btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, identity)
     lilist = collect(keys(count_dict))
-    cols = [:count=>[count_dict[sf] for sf in lilist],
+    ntrace = sum(first, btraces)
+    perc(var::Symbol, counts) =
+        (percent ? Symbol(var, "_percent") => round.(counts ./ ntrace * 100, 2) :
+         var => counts)
+    cols = [perc(:count, [count_dict[sf] for sf in lilist]),
             :stackframe=>lilist,
             :line=>map(get_line, lilist),
             :file=>map(get_file, lilist),
@@ -352,11 +357,11 @@ function flat(pd::ProfileData;
             :module=>map(get_module, lilist)]
     if _module !== nothing
         end_count_dict = end_counts_from_traces(btraces, identity, get_module)
-        insert!(cols, 2, :end_count=>[get(end_count_dict, sf, 0) for sf in lilist])
+        insert!(cols, 2, perc(:end_count, [get(end_count_dict, sf, 0) for sf in lilist]))
     end
     df = DataFrame(OrderedDict(cols...))
     if _module !== nothing; df = df[df[:module] .=== _module, :] end
-    return sort(df, cols=:count, rev=true)
+    return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
 
 flat(pd::ProfileData, _module::Module; kwargs...) = 
