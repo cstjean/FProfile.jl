@@ -6,6 +6,7 @@
 module FProfile
 
 export @fprofile, backtraces, tree, flat
+export is_C_call, get_stackframe, get_method, get_file, get_function, get_module
 
 using Base: Profile
 using Base.Core: MethodInstance
@@ -336,6 +337,7 @@ get_file(file::Symbol) = file
 get_module(m::Module) = m
 
 is_C_call(sf::StackFrame) = sf.from_c
+is_inlined(sf::StackFrame) = sf.inlined
 
 symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
                               # The line is already part of :stackframe, and grouping
@@ -357,21 +359,21 @@ function is_applicable(f::Function, object)
 end
 
 function flat(pd::ProfileData;
-              C = false,
-              combine = true,
-              combineby = :stackframe,
-              maxdepth::Int = typemax(Int),
-              mincount::Int = 0,
-              noisefloor = 0,
-              percent = true,
+              C=false,
+              combineby=:stackframe,
+              percent=true,
+              inlined=true,
               # internal parameter
               _module=nothing)
+    if _module!==nothing && combineby in (:function, :file)
+        # Because a function/file isn't uniquely associated to a module
+        error("Cannot combineby $combineby if a module is provided; try `combineby=:method`")
+    end
     @assert(haskey(symbol2accessor, combineby),
             "combineby must be one of $(collect(Base.keys(symbol2accessor)))")
     btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, symbol2accessor[combineby])
     keys = collect(Base.keys(count_dict))
-    @show typeof(keys[1])
     @assert !isempty(keys) "ProfileData contains no applicable traces"
     ntrace = sum(first, btraces)
     perc(var::Symbol, counts) =
@@ -387,6 +389,7 @@ function flat(pd::ProfileData;
                                [col=>map(f, keys) for (col, f) in symbol2accessor
                                 if is_applicable(f, first(keys))]...))
     if _module !== nothing; df = df[df[:module] .=== _module, :] end
+    if !inlined; df = df[!is_inlined.(df[:stackframe]), :] end
     return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
 
