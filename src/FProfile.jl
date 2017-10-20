@@ -54,21 +54,24 @@ end
 
 ################################################################################
 
-""" `backtraces(pd::ProfileData)` returns a vector of `(count, backtrace)`, where
-`backtrace` is a `Vector{Vector{StackFrame}}` which occurred `count` times during
-the profiler run. """
-function backtraces(pd::ProfileData; flatten=true)
+""" `backtraces(pd::ProfileData; flatten=true, C=false)` returns a vector of `(count,
+backtrace)`, where `backtrace` is a `Vector{StackFrame}` which occurred `count`
+times during the profiler run. If `C` is `false`, C function calls are excluded. """
+function backtraces(pd::ProfileData; flatten=true, C=false)
     data, lidict = pd.data, pd.lidict
     if flatten
         data, lidict = Profile.flatten(data, lidict)
     end
     data, counts = Profile.tree_aggregate(data)
-    return [(count, [lidict[d] for d in backtrace])
+    return [(count, [lidict[d] for d in backtrace if C || !is_C_call(lidict[d])])
             for (count, backtrace) in zip(counts, data)]
 end
 
 ################################################################################
+# tree view
 
+""" `Node(li::StackFrame, count::Int, children::Vector{Node})` represents the `tree`
+view of the profiling data. """
 struct Node
     li::StackFrame
     count::Int
@@ -326,16 +329,15 @@ get_function(sf::StackFrame) = get_function(get_method(sf))
 get_module(met::Method) = met.module
 get_module(sf::StackFrame) = get_module(get_method(sf))
 
-is_C(sf::StackFrame) = sf.from_c
+is_C_call(sf::StackFrame) = sf.from_c
 
-function flat(pd::ProfileData, data::Vector, lidict::LineInfoFlatDict, fmt::ProfileFormat)
-    # if !fmt.C
-    #     pd = purgeC(pd)
-    # end
-    # iplist, n = count_flat(data)
-    # lilist, n = parse_flat(iplist, n, lidict, fmt.C)
-    #count_dict = counts(tree(pd), identity)
-    btraces = backtraces(pd; flatten=true)
+function flat(pd::ProfileData;
+              C = false,
+              combine = true,
+              maxdepth::Int = typemax(Int),
+              mincount::Int = 0,
+              noisefloor = 0)
+    btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, identity)
     end_count_dict = end_counts_from_traces(btraces, identity, get_module)
     lilist = collect(keys(count_dict))
@@ -350,24 +352,6 @@ function flat(pd::ProfileData, data::Vector, lidict::LineInfoFlatDict, fmt::Prof
                                :function=>map(get_function, lilist),
                                :module=>map(get_module, lilist)))
     return sort(df, cols=:count, rev=true)
-end
-
-function flat(pd::ProfileData, fmt::ProfileFormat)
-    newdata, newdict = flatten(pd.data, pd.lidict)
-    return flat(pd, newdata, newdict, fmt)
-end
-
-function flat(pd::ProfileData;
-              C = false,
-              combine = true,
-              maxdepth::Int = typemax(Int),
-              mincount::Int = 0,
-              noisefloor = 0)
-    flat(pd, ProfileFormat(C = C,
-            combine = combine,
-            maxdepth = maxdepth,
-            mincount = mincount,
-            noisefloor = noisefloor))
 end
 
 
