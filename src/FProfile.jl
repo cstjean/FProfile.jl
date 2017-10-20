@@ -259,30 +259,6 @@ end
 
 ################################################################################
 
-# pop1!(acc::Accumulator, k) = push!(acc, k, -1) # cf. DataStructures#285
-
-# # These functions are not very useful anymore.
-# function accumulated_counts!(encountered::Accumulator, counts::Dict, node::Node,
-#                              key::Function)
-#     k = key(node.li)::Any
-#     if encountered[k] == 0
-#         counts[k] = get(counts, k, 0) + node.count
-#     end
-#     push!(encountered, k)
-#     for child in node.children
-#         accumulated_counts!(encountered, counts, child, key)
-#     end
-#     pop1!(encountered, k)
-# end
-
-# function accumulated_counts(node::Node, key::Function)
-#     d = Dict()
-#     accumulated_counts!(counter(Any), d, node, key)
-#     d
-# end
-
-# -----------------------------------------------------------------------------
-
 function counts_from_traces(backtraces::Vector, key::Function,
                             encountered_key::Function=key)
     counts = Dict()
