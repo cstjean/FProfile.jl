@@ -343,15 +343,16 @@ function flat(pd::ProfileData;
               _module=nothing)
     btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, identity)
-    lilist = collect(keys(count_dict))
+    keys = collect(Base.keys(count_dict))
+    @assert !isempty(keys) "ProfileData contains no applicable traces"
     ntrace = sum(first, btraces)
     perc(var::Symbol, counts) =
         (percent ? Symbol(var, "_percent") => round.(counts ./ ntrace * 100, 2) :
          var => counts)
-    count_cols = [perc(:count, [count_dict[sf] for sf in lilist])]
+    count_cols = [perc(:count, [count_dict[sf] for sf in keys])]
     if _module !== nothing
         end_count_dict = end_counts_from_traces(btraces, identity, get_module)
-        push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in lilist]))
+        push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
     end
     feat_cols = [:stackframe=>get_stackframe,
                  :line=>get_line,
@@ -361,7 +362,7 @@ function flat(pd::ProfileData;
                  :function=>get_function,
                  :module=>get_module]
     df = DataFrame(OrderedDict(count_cols...,
-                               [col=>map(f, lilist) for (col, f) in feat_cols]...))
+                               [col=>map(f, keys) for (col, f) in feat_cols]...))
     if _module !== nothing; df = df[df[:module] .=== _module, :] end
     return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
