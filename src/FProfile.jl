@@ -316,29 +316,45 @@ const missing_info_method_instance = let res=nothing
 end
 
 
-get_line(sf::StackFrame) = sf.line
-get_file(sf::StackFrame) = sf.file
-get_specialization(sf::StackFrame) = get(sf.linfo, missing_info_method_instance)
-get_method(mi::MethodInstance) = mi.def
-get_method(sf::StackFrame) = get_method(get_specialization(sf))
-function get_function(met::Method)
+get_line(obj) = get_stackframe(obj).line
+get_file(obj) = get_method(obj).file
+get_specialization(obj) = get(get_stackframe(obj).linfo, missing_info_method_instance)
+get_method(obj) = get_specialization(obj).def
+function get_function(sf)
+    met = get_method(sf)
     ftype = fieldtype(met.sig, 1)
     return isdefined(ftype, :instance) ? ftype.instance : missing_info
 end
-get_function(sf::StackFrame) = get_function(get_method(sf))
-get_module(met::Method) = met.module
-get_module(sf::StackFrame) = get_module(get_method(sf))
+get_module(obj) = get_method(obj).module
+
 get_stackframe(sf::StackFrame) = sf
+get_specialization(mi::MethodInstance) = mi
+get_method(met::Method) = met
+get_function(fun::Function) = fun
+get_line(line::Int) = line
+get_file(file::Symbol) = file
+get_module(m::Module) = m
 
 is_C_call(sf::StackFrame) = sf.from_c
 
 symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
-                              :line=>get_line,
-                              :file=>get_file,
+                              # The line is already part of :stackframe, and grouping
+                              # on :stackframe makes more sense anyway.
+                              #:line=>get_line,
                               :specialization=>get_specialization,
                               :method=>get_method,
+                              :file=>get_file,
                               :function=>get_function,
                               :module=>get_module)
+
+function is_applicable(f::Function, object)
+    try
+        f(object)
+    catch e
+        if e isa MethodError; return false else rethrow() end
+    end
+    true
+end
 
 function flat(pd::ProfileData;
               C = false,
@@ -350,9 +366,12 @@ function flat(pd::ProfileData;
               percent = true,
               # internal parameter
               _module=nothing)
+    @assert(haskey(symbol2accessor, combineby),
+            "combineby must be one of $(collect(Base.keys(symbol2accessor)))")
     btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, symbol2accessor[combineby])
     keys = collect(Base.keys(count_dict))
+    @show typeof(keys[1])
     @assert !isempty(keys) "ProfileData contains no applicable traces"
     ntrace = sum(first, btraces)
     perc(var::Symbol, counts) =
@@ -360,12 +379,13 @@ function flat(pd::ProfileData;
          var => counts)
     count_cols = [perc(:count, [count_dict[sf] for sf in keys])]
     if _module !== nothing
-        end_count_dict = end_counts_from_traces(btraces, identity, get_module)
+        end_count_dict = end_counts_from_traces(btraces, symbol2accessor[combineby],
+                                                get_module)
         push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
     end
     df = DataFrame(OrderedDict(count_cols...,
                                [col=>map(f, keys) for (col, f) in symbol2accessor
-                                if method_exists(f, (typeof(first(keys)),))]...))
+                                if is_applicable(f, first(keys))]...))
     if _module !== nothing; df = df[df[:module] .=== _module, :] end
     return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
