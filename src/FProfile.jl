@@ -328,6 +328,7 @@ end
 get_function(sf::StackFrame) = get_function(get_method(sf))
 get_module(met::Method) = met.module
 get_module(sf::StackFrame) = get_module(get_method(sf))
+get_stackframe(sf::StackFrame) = sf
 
 is_C_call(sf::StackFrame) = sf.from_c
 
@@ -347,19 +348,20 @@ function flat(pd::ProfileData;
     perc(var::Symbol, counts) =
         (percent ? Symbol(var, "_percent") => round.(counts ./ ntrace * 100, 2) :
          var => counts)
-    cols = [perc(:count, [count_dict[sf] for sf in lilist]),
-            :stackframe=>lilist,
-            :line=>map(get_line, lilist),
-            :file=>map(get_file, lilist),
-            :specialization=>map(get_specialization, lilist),
-            :method=>map(get_method, lilist),
-            :function=>map(get_function, lilist),
-            :module=>map(get_module, lilist)]
+    count_cols = [perc(:count, [count_dict[sf] for sf in lilist])]
     if _module !== nothing
         end_count_dict = end_counts_from_traces(btraces, identity, get_module)
-        insert!(cols, 2, perc(:end_count, [get(end_count_dict, sf, 0) for sf in lilist]))
+        push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in lilist]))
     end
-    df = DataFrame(OrderedDict(cols...))
+    feat_cols = [:stackframe=>get_stackframe,
+                 :line=>get_line,
+                 :file=>get_file,
+                 :specialization=>get_specialization,
+                 :method=>get_method,
+                 :function=>get_function,
+                 :module=>get_module]
+    df = DataFrame(OrderedDict(count_cols...,
+                               [col=>map(f, lilist) for (col, f) in feat_cols]...))
     if _module !== nothing; df = df[df[:module] .=== _module, :] end
     return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
