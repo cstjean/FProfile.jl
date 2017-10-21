@@ -1,4 +1,4 @@
-# This file contains several functions derived from Julia's profile.jl
+# Copyright notice: this file contains several functions derived from Julia's profile.jl
 
 # ip = instruction pointer 
 # li = line-info
@@ -6,7 +6,8 @@
 module FProfile
 
 export @fprofile, backtraces, tree, flat
-export is_C_call, get_stackframe, get_method, get_file, get_function, get_module
+export get_stackframe, get_method, get_file, get_function, get_module,
+       is_C_call, is_inlined
 
 using Base: Profile
 using Base.Core: MethodInstance
@@ -78,11 +79,26 @@ struct Node
     count::Int
     children::Vector{Node}
 end
+get_stackframe(node::Node) = node.li
+Node(node::Node, children::Vector{Node}) = Node(node.li, node.count, children)
 Base.getindex(node::Node, i::Int) = node.children[i]
 Base.getindex(node::Node, i::Int, args...) = node[i][args...]
 
+
+# This filter code was taken from TraceCalls.jl
+filter_descendents(f, node) = # helper
+    # Special casing because of #18852
+    isempty(node.children) ? Node[] : Node[n for child in node.children
+                                           for n in filter_(f, child)]
+filter_(f, node) =
+    (f(get_stackframe(node)) ? [Node(node, filter_descendents(f, node))] :
+     filter_descendents(f, node))
+Base.filter(f::Function, node::Node) = Node(node, filter_descendents(f, node))
+
+
 function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int,
                              ndigcounts::Int, ndigline::Int)
+    # Very nearly the same code as in Base
     nindent = min(cols>>1, level)
     ntext = cols - nindent - ndigcounts - ndigline - 5
     widthfile = floor(Integer, 0.4ntext)
@@ -285,13 +301,16 @@ end_counts_from_traces(backtraces::Vector, key::Function,
 
 # -----------------------------------------------------------------------------
 
-missing_info() = nothing
+missing_info() = nothing  # placeholder method
 missing_info()  # call it to generate a specialization
 const missing_info_method_instance = let res=nothing
     Base.visit(spec->(res=spec;), methods(missing_info).ms[1].specializations)
     res
 end
 
+
+## Accessor functions
+#####################
 
 get_line(obj) = get_stackframe(obj).line
 get_file(obj) = get_method(obj).file
@@ -334,6 +353,17 @@ function is_applicable(f::Function, object)
     true
 end
 
+"""    flat(pd::ProfileData; C=false, combineby=:stackframe, percent=true, inlined=true)
+
+Returns aggregated profiling results as a `DataFrame`. Arguments:
+
+ - `C=false`: whether to exclude C calls
+ - `combineby`: one of `[:stackframe, :specialization, :method, :file, :function, :module]`.
+   `combineby=stackframe` provides the most detailed report, with method and line number.
+   The other options combine rows that have the same `combineby`.
+ - `percent=true`: show percentages
+ - `inlined=true`: whether to show inlined function calls
+"""
 function flat(pd::ProfileData;
               C=false,
               combineby=:stackframe,
