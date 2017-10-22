@@ -6,7 +6,9 @@
 
 [![codecov.io](http://codecov.io/github/cstjean/FProfile.jl/coverage.svg?branch=master)](http://codecov.io/github/cstjean/FProfile.jl?branch=master)
 
-FProfile.jl is a nicer interface for Julia's [sampling profiler](https://docs.julialang.org/en/latest/manual/profile/). 
+FProfile.jl is a nicer interface for Julia's [sampling
+profiler](https://docs.julialang.org/en/latest/manual/profile/). It defines a few
+profiling metrics not available in `Base.Profile`'s reports.
 
 # Manual
 
@@ -14,7 +16,7 @@ FProfile.jl is a nicer interface for Julia's [sampling profiler](https://docs.ju
 
 # Related efforts
 
-- [ProfileView.jl](https://github.com/timholy/ProfileView.jl) is really good, especially
-  if your code is hierarchical.
+- [ProfileView.jl](https://github.com/timholy/ProfileView.jl) is a really good way to
+  visualize profiling data, especially if your code is hierarchical.
 - [TraceCalls.jl](http://nbviewer.jupyter.org/github/cstjean/TraceCalls.jl/blob/master/README.ipynb#Profiling) can be useful to track down memory allocations and type-stability issues.
 
