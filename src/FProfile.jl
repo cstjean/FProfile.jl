@@ -6,7 +6,7 @@
 module FProfile
 
 export @fprofile, backtraces, tree, flat
-export get_stackframe, get_method, get_file, get_function, get_module,
+export get_stackframe, get_method, get_specialization, get_file, get_function, get_module,
        is_C_call, is_inlined
 
 using Base: Profile
