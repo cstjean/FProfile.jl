@@ -23,7 +23,7 @@ struct ProfileData  # a mere container for Base.Profile data
     lidict::Profile.LineInfoDict
 end
 ProfileData() = ProfileData(Profile.retrieve()...)
-Base.length(pd::ProfileData) = sum(first, backtraces(pd))
+Base.length(pd::ProfileData) = mapreduce(first, +, 0, backtraces(pd))
 Base.show(io::IO, pd::ProfileData) =
     write(io, "ProfileData($(length(pd)) backtraces)")
 Profile.print(pd::ProfileData; kwargs...) = Profile.print(pd.data, pd.lidict; kwargs...)
@@ -75,12 +75,12 @@ end
 """ `Node(li::StackFrame, count::Int, children::Vector{Node})` represents the `tree`
 view of the profiling data. """
 struct Node
-    li::StackFrame
+    sf::StackFrame
     count::Int
     children::Vector{Node}
 end
-get_stackframe(node::Node) = node.li
-Node(node::Node, children::Vector{Node}) = Node(node.li, node.count, children)
+get_stackframe(node::Node) = node.sf
+Node(node::Node, children::Vector{Node}) = Node(node.sf, node.count, children)
 Base.getindex(node::Node, i::Int) = node.children[i]
 Base.getindex(node::Node, i::Int, args...) = node[i][args...]
 
@@ -144,16 +144,16 @@ end
 function Base.show(io::IO, node::Node)
     cols::Int = Base.displaysize(io)[2]
     level = get(io, :profile_tree_level, 0)
-    str = tree_format(node.li, node.count, level, cols,
+    str = tree_format(node.sf, node.count, level, cols,
                       get(io, :profile_ndigcounts, ndigits(node.count)),
-                      get(io, :profile_ndigline, tree_format_linewidth(node.li)))
+                      get(io, :profile_ndigline, tree_format_linewidth(node.sf)))
     if !isempty(str) println(io, str) end
     if !isempty(node.children)
         io2 = IOContext(io,
                         profile_tree_level=level+1,
                         profile_ndigcounts=maximum(ndigits(child.count)
                                                    for child in node.children),
-                        profile_ndigline=maximum(tree_format_linewidth(child.li)
+                        profile_ndigline=maximum(tree_format_linewidth(child.sf)
                                                  for child in node.children))
         for c in node.children
             show(io2, c)
@@ -164,7 +164,7 @@ end
 function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
               lidict::LineInfoFlatDict, level::Int, fmt::ProfileFormat, noisefloor::Int)
     if level > fmt.maxdepth
-        return
+        return []::Any
     end
     # Organize backtraces into groups that are identical up to this level
     if fmt.combine
@@ -260,6 +260,29 @@ function tree(data::Vector, lidict::LineInfoDict, fmt::ProfileFormat)
     return tree(newdata, newdict, fmt)
 end
 
+"""
+    tree(pd::ProfileData; C = false, combine = true, maxdepth::Int = typemax(Int),
+         mincount::Int = 0, noisefloor = 0)
+
+Returns a tree view of the profiling data `pd`
+
+The keyword arguments can be any combination of:
+
+ - `C` -- If `true`, backtraces from C and Fortran code are shown (normally they are excluded).
+
+ - `combine` -- If `true` (default), instruction pointers are merged that correspond to the same line of code.
+
+ - `maxdepth` -- Limits the depth higher than `maxdepth` in the `:tree` format.
+
+ - `sortedby` -- Controls the order in `:flat` format. `:filefuncline` (default) sorts by the source
+    line, whereas `:count` sorts in order of number of collected samples.
+
+ - `noisefloor` -- Limits frames that exceed the heuristic noise floor of the sample (only applies to format `:tree`).
+    A suggested value to try for this is 2.0 (the default is 0). This parameter hides samples for which `n <= noisefloor * √N`,
+    where `n` is the number of samples on this line, and `N` is the number of samples for the callee.
+
+ - `mincount` -- Limits the printout to only those lines with at least `mincount` occurrences.
+"""
 function tree(pd::ProfileData;
               C = false,
               combine = true,
