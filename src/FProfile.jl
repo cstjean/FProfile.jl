@@ -3,6 +3,7 @@
 # ip = instruction pointer 
 # li = line-info
 
+__precompile__()
 module FProfile
 
 export @fprofile, backtraces, tree, flat

@@ -17,6 +17,6 @@ profiling metrics not available in `Base.Profile`'s reports.
 # Related efforts
 
 - [ProfileView.jl](https://github.com/timholy/ProfileView.jl) is a really good way to
-  visualize profiling data, especially if your code is hierarchical.
+  visualize profiling data.
 - [TraceCalls.jl](http://nbviewer.jupyter.org/github/cstjean/TraceCalls.jl/blob/master/README.ipynb#Profiling) can be useful to track down memory allocations and type-stability issues.
 
