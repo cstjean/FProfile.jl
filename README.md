@@ -6,11 +6,11 @@
 
 [![codecov.io](http://codecov.io/github/cstjean/FProfile.jl/coverage.svg?branch=master)](http://codecov.io/github/cstjean/FProfile.jl?branch=master)
 
-FProfile.jl is a nicer interface over Julia's [sampling profiler](https://docs.julialang.org/en/latest/manual/profile/). 
+FProfile.jl is a nicer interface for Julia's [sampling profiler](https://docs.julialang.org/en/latest/manual/profile/). 
 
 # Manual
 
-todo
+[User manual](http://nbviewer.jupyter.org/github/cstjean/FProfile.jl/blob/master/Manual.ipynb)
 
 # Related efforts
 

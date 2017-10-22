@@ -1,5 +1,5 @@
-using FunctionalProfile
+using FProfile
 using Base.Test
+using NBInclude
 
-# write your own tests here
-@test 1 == 2
+nbinclude("../Manual.ipynb")
