@@ -8,7 +8,7 @@ module FProfile
 
 export @fprofile, backtraces, tree, flat
 export get_stackframe, get_method, get_specialization, get_file, get_function, get_module,
-       is_C_call, is_inlined
+       is_C_call, is_inlined, filter_bloodline
 
 using Base: Profile
 using Base.Core: MethodInstance
@@ -95,6 +95,27 @@ filter_(f, node) =
     (f(get_stackframe(node)) ? [Node(node, filter_descendents(f, node))] :
      filter_descendents(f, node))
 Base.filter(f::Function, node::Node) = Node(node, filter_descendents(f, node))
+
+prune(node::Node) = Node(node, Node[])
+
+
+const empty_node_dummy = Node(UNKNOWN, -1, [])
+
+"""    filter_bloodline(f::Function, node::Node; keep_descendents=true)
+
+keeps all nodes in the tree for which `f(::Trace)` is true of some of its descendents OR
+ancestors. """
+function filter_bloodline(f::Function, node::Node; keep_descendents=true)
+    if f(get_stackframe(node))
+        return keep_descendents ? node : prune(node)
+    else
+        children0 = Node[filter_bloodline(f, sub_node; keep_descendents=keep_descendents)
+                         for sub_node in node.children]
+        children = filter(c->c!==empty_node_dummy, children0)
+        return isempty(children) ? empty_node_dummy : Node(node, children)
+    end
+end
+
 
 
 function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int,
@@ -317,11 +338,19 @@ function counts_from_traces(backtraces::Vector, key::Function,
     return counts
 end
 
-end_counts_from_traces(backtraces::Vector, key::Function,
-                       encountered_key::Function) =
-    counts_from_traces([(c, reverse(trace)) for (c, trace) in backtraces],
-                       key, encountered_key)
-
+function end_counts_from_traces(backtraces::Vector, key::Function, applicable::Function)
+    counts = Dict()
+    for (trace_count, trace) in backtraces
+        for sf in @view trace[end:-1:1]
+            if applicable(sf)
+                k = key(sf)
+                counts[k] = get(counts, k, 0) + trace_count
+                break
+            end
+        end
+    end
+    return counts
+end
 
 # -----------------------------------------------------------------------------
 
@@ -412,18 +441,21 @@ function flat(pd::ProfileData;
     count_cols = [perc(:count, [count_dict[sf] for sf in keys])]
     if _module !== nothing
         end_count_dict = end_counts_from_traces(btraces, symbol2accessor[combineby],
-                                                get_module)
+                                                sf->get_module(sf) in _module)
         push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
     end
     df = DataFrame(OrderedDict(count_cols...,
                                [col=>map(f, keys) for (col, f) in symbol2accessor
                                 if is_applicable(f, first(keys))]...))
-    if _module !== nothing; df = df[df[:module] .=== _module, :] end
+    if _module !== nothing; df = df[[m in _module for m in df[:module]], :] end
     if !inlined; df = df[!is_inlined.(df[:stackframe]), :] end
     return sort(df, cols=percent ? :count_percent : :count, rev=true)
 end
 
-flat(pd::ProfileData, _module::Module; kwargs...) = 
+flat(pd::ProfileData, _module::Tuple; kwargs...) = 
     flat(pd; kwargs..., _module=_module)
+
+flat(pd::ProfileData, _module::Module; kwargs...) = 
+    flat(pd; kwargs..., _module=(_module,))
 
 end # module
