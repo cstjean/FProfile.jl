@@ -8,7 +8,7 @@ module FProfile
 
 export @fprofile, backtraces, tree, flat
 export get_stackframe, get_method, get_specialization, get_file, get_function, get_module,
-       is_C_call, is_inlined, filter_bloodline, prune
+       is_C_call, is_inlined, filter_bloodline, prune, details
 
 using Base: Profile
 using Base.Core: MethodInstance
@@ -101,12 +101,16 @@ prune(node::Node, i=0) =
 
 const empty_node_dummy = Node(UNKNOWN, -1, [])
 
-"""    filter_bloodline(f::Function, node::Node; keep_descendents=true)
+"""    filter_bloodline(f::Function, node::Node; keep_descendents=true, keep_ancestors=true)
 
 keeps all nodes in the tree for which `f(::Trace)` is true of some of its descendents OR
 ancestors. """
-function filter_bloodline(f::Function, node::Node; keep_descendents=true)
-    if f(get_stackframe(node))
+function filter_bloodline(f::Function, node::Node; keep_descendents=true,
+                          keep_ancestors=true)
+    if !keep_ancestors
+        return filter_bloodline(f, Node(UNKNOWN, -1, find_nodes(f, node));
+                                keep_descendents=keep_descendents)
+    elseif f(get_stackframe(node))
         return keep_descendents ? node : prune(node)
     else
         children0 = Node[filter_bloodline(f, sub_node; keep_descendents=keep_descendents)
@@ -116,7 +120,16 @@ function filter_bloodline(f::Function, node::Node; keep_descendents=true)
     end
 end
 
-
+""" `find_nodes(f, node)` returns a vector of all nodes satisfying `f` """
+function find_nodes(f::Function, node::Node)
+    out = Node[]
+    function trav(n)
+        if f(n) push!(out, n) end
+        foreach(trav, n.children)
+    end
+    trav(node)
+    out
+end
 
 function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int,
                              ndigcounts::Int, ndigline::Int)
@@ -460,5 +473,17 @@ flat(pd::ProfileData, _module::Tuple; kwargs...) =
 
 flat(pd::ProfileData, _module::Module; kwargs...) = 
     flat(pd; kwargs..., _module=(_module,))
+
+""" `df_combineby(df::DataFrame)` returns by what this `df` was combined. """
+df_combineby(df::DataFrame) =
+    names(df)[findfirst(n->haskey(symbol2accessor, n), names(df))]
+
+function details(pd::ProfileData, df::DataFrame, nrow::Int; depth=2)
+    col = df_combineby(df)
+    accessor = symbol2accessor[col]
+    obj = df[nrow, col]
+    return prune(filter_bloodline(sf->accessor(sf)==obj, tree(pd), keep_ancestors=false),
+                 depth)
+end
 
 end # module
