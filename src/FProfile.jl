@@ -440,12 +440,7 @@ flat(pd::ProfileData, _module::Module; kwargs...) =
 df_combineby(df::DataFrame) =
     names(df)[findfirst(n->haskey(symbol2accessor, n), names(df))]
 
-function details(pd::ProfileData, df::DataFrame, nrow::Int; depth=2)
-    col = df_combineby(df)
-    accessor = symbol2accessor[col]
-    obj = df[nrow, col]
-    return prune(filter_bloodline(sf->accessor(sf)==obj, tree(pd), keep_ancestors=false),
-                 depth)
-end
+tree(pd::ProfileData, df::DataFrame, nrow::Int, neighborhood::UnitRange=-1:1) =
+    tree(pd, df[nrow, df_combineby(df)])
 
 end # module
