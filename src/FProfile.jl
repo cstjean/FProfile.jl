@@ -205,17 +205,17 @@ end
 
 tree(pd::ProfileData; C = false, mincount::Int = 0, noisefloor = 0) =
     tree(backtraces(pd; C=C); mincount=mincount, noisefloor=noisefloor)
-function tree(bt::BackTraces;
-              mincount::Int = 0,
-              noisefloor = 0)
+function tree(bt::BackTraces; mincount::Int = 0, noisefloor = 0)
+    # We start with an empty Node tree, then iterate over every trace, adding counts and
+    # new branches.
     root = FProfile.Node(FProfile.UNKNOWN, -1, [])
     for (count, trace) in bt
         node = root
         for sf::StackFrame in trace
             let sf=sf
                 i = findfirst(n->n.sf==sf, node.children)
-                if i == 0
-                    next_node = FProfile.Node(sf, count, FProfile.Node[])
+                if i == 0 # make a new branch
+                    next_node = FProfile.Node(sf, 0, FProfile.Node[])
                     push!(node.children, next_node)
                 else
                     next_node = node.children[i]
@@ -225,6 +225,7 @@ function tree(bt::BackTraces;
             end
         end
     end
+    # Sort the children in each node alphabetically. See Profile.liperm.
     return map(n->Node(n, n.children[Profile.liperm(map(get_stackframe, n.children))]),
                root)
 end

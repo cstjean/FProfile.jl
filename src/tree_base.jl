@@ -1,6 +1,5 @@
 # `tree_base(pd)` returns the same results as Profile.print().
-# I don't understand where the differences with `FProfile.tree()` come from, but it seems
-# small enough to ignore.
+# It's equivalent to `tree`, but ~3X faster, so I'm keeping it here.
 
 function tree_base(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
                    lidict::LineInfoFlatDict, level::Int, fmt::ProfileFormat, noisefloor::Int)
