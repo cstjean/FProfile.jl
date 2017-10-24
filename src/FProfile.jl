@@ -8,7 +8,7 @@ module FProfile
 
 export @fprofile, backtraces, tree, flat
 export get_stackframe, get_method, get_specialization, get_file, get_function, get_module,
-       is_C_call, is_inlined, filter_bloodline
+       is_C_call, is_inlined, filter_bloodline, prune
 
 using Base: Profile
 using Base.Core: MethodInstance
@@ -96,8 +96,8 @@ filter_(f, node) =
      filter_descendents(f, node))
 Base.filter(f::Function, node::Node) = Node(node, filter_descendents(f, node))
 
-prune(node::Node) = Node(node, Node[])
-
+prune(node::Node, i=0) =
+    i<=0 ? Node(node, Node[]) : Node(node, Node[prune(n, i-1) for n in node.children])
 
 const empty_node_dummy = Node(UNKNOWN, -1, [])
 
