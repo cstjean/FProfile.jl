@@ -57,6 +57,56 @@ macro fprofile(niter::Int, expr, args...)
 end
 
 ################################################################################
+# Accessor functions
+
+get_line(obj) = get_stackframe(obj).line
+get_file(obj) = get_method(obj).file
+get_specialization(obj) = get(get_stackframe(obj).linfo, missing_info_method_instance)
+get_method(obj) = get_specialization(obj).def
+function get_function(sf)
+    met = get_method(sf)
+    ftype = fieldtype(met.sig, 1)
+    return isdefined(ftype, :instance) ? ftype.instance : missing_info
+end
+get_module(obj) = get_method(obj).module
+
+get_stackframe(sf::StackFrame) = sf
+get_specialization(mi::MethodInstance) = mi
+get_method(met::Method) = met
+get_function(fun::Function) = fun
+get_line(line::Int) = line
+get_file(file::Symbol) = file
+get_module(m::Module) = m
+
+is_C_call(sf::StackFrame) = sf.from_c
+is_inlined(sf::StackFrame) = sf.inlined
+
+symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
+                              # The line is already part of :stackframe, and grouping
+                              # on :stackframe makes more sense anyway.
+                              #:line=>get_line,
+                              :specialization=>get_specialization,
+                              :method=>get_method,
+                              :file=>get_file,
+                              :function=>get_function,
+                              :module=>get_module)
+type2symbol_dict = Dict(StackFrame=>:stackframe,
+                        MethodInstance=>:specialization,
+                        Method=>:method,
+                        String=>:file,
+                        Function=>:function,
+                        Module=>:module)::Any
+
+function type2symbol(T)
+    for (typ, sym) in type2symbol_dict
+        if T <: typ; return sym; end
+    end
+    error("Can only handle objects of types $(collect(keys(type2symbol)))")
+end
+type2accessor(x::Type) = symbol2accessor[type2symbol(x)]
+
+################################################################################
+# backtraces
 
 """ `backtraces(pd::ProfileData; flatten=true, C=false)` returns a vector of `(count,
 backtrace)`, where `backtrace` is a `Vector{StackFrame}` which occurred `count`
@@ -67,8 +117,44 @@ function backtraces(pd::ProfileData; flatten=true, C=false)
         data, lidict = Profile.flatten(data, lidict)
     end
     data, counts = Profile.tree_aggregate(data)
-    return [(count, StackFrame[lidict[d] for d in backtrace if C || !is_C_call(lidict[d])])
-            for (count, backtrace) in zip(counts, data)]
+    out = BackTraces(0)
+    for (count, backtrace) in zip(counts, data)
+        new_trace = StackFrame[lidict[d] for d in backtrace if C || !is_C_call(lidict[d])]
+        if !isempty(new_trace)
+            push!(out, (count, new_trace))
+        end
+    end
+    return out
+end
+
+function select_backtrace_neighborhoods(btraces::BackTraces, pred::Function,
+                                        neighborhood::UnitRange)
+    # Returns a vector of traces, possibly longer than the input, that contains every
+    # neighborhood centered around where `pred(::StackFrame)` is true. Neighborhood
+    # that touch/overlap are merged.
+    out = BackTraces(0)
+    for (count, trace) in btraces
+        hits = find(pred, trace)
+        in_hood(i) = any(i in neighborhood+h for h in hits)
+        positions = 1:length(trace)
+        i = 1
+        while true
+            start = findnext(in_hood, positions, i)
+            if start != 0
+                stop = findnext(!in_hood, positions, start)
+                if stop == 0
+                    push!(out, (count, trace[start:end]))
+                    break
+                else
+                    push!(out, (count, trace[start:stop-1]))
+                    i = stop
+                end
+            else
+                break
+            end
+        end
+    end
+    return out
 end
 
 ################################################################################
@@ -230,6 +316,13 @@ function tree(bt::BackTraces; mincount::Int = 0, noisefloor = 0)
                root)
 end
 
+function tree(pd::ProfileData, object::T, neighborhood::UnitRange=-1:1; kwargs...) where T
+    acc = type2accessor(T)
+    tree(select_backtrace_neighborhoods(backtraces(pd),
+                                        sf->acc(sf)==object, neighborhood);
+         kwargs...)
+end
+
 include("tree_base.jl")
 
 ################################################################################
@@ -275,43 +368,6 @@ const missing_info_method_instance = let res=nothing
     Base.visit(spec->(res=spec;), methods(missing_info).ms[1].specializations)
     res
 end
-
-
-## Accessor functions
-#####################
-
-get_line(obj) = get_stackframe(obj).line
-get_file(obj) = get_method(obj).file
-get_specialization(obj) = get(get_stackframe(obj).linfo, missing_info_method_instance)
-get_method(obj) = get_specialization(obj).def
-function get_function(sf)
-    met = get_method(sf)
-    ftype = fieldtype(met.sig, 1)
-    return isdefined(ftype, :instance) ? ftype.instance : missing_info
-end
-get_module(obj) = get_method(obj).module
-
-get_stackframe(sf::StackFrame) = sf
-get_specialization(mi::MethodInstance) = mi
-get_method(met::Method) = met
-get_function(fun::Function) = fun
-get_line(line::Int) = line
-get_file(file::Symbol) = file
-get_module(m::Module) = m
-
-is_C_call(sf::StackFrame) = sf.from_c
-is_inlined(sf::StackFrame) = sf.inlined
-
-symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
-                              # The line is already part of :stackframe, and grouping
-                              # on :stackframe makes more sense anyway.
-                              #:line=>get_line,
-                              :specialization=>get_specialization,
-                              :method=>get_method,
-                              :file=>get_file,
-                              :function=>get_function,
-                              :module=>get_module)
-
 
 
 function is_applicable(f::Function, object)
