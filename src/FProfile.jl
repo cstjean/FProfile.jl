@@ -18,6 +18,7 @@ using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
 using DataFrames
 using DataStructures: OrderedDict, Accumulator, counter
 
+const BackTraces = Vector{Tuple{Int64,Vector{StackFrame}}}
 
 struct ProfileData  # a mere container for Base.Profile data
     data::Vector
@@ -66,7 +67,7 @@ function backtraces(pd::ProfileData; flatten=true, C=false)
         data, lidict = Profile.flatten(data, lidict)
     end
     data, counts = Profile.tree_aggregate(data)
-    return [(count, [lidict[d] for d in backtrace if C || !is_C_call(lidict[d])])
+    return [(count, StackFrame[lidict[d] for d in backtrace if C || !is_C_call(lidict[d])])
             for (count, backtrace) in zip(counts, data)]
 end
 
@@ -75,7 +76,7 @@ end
 
 """ `Node(li::StackFrame, count::Int, children::Vector{Node})` represents the `tree`
 view of the profiling data. """
-struct Node
+mutable struct Node
     sf::StackFrame
     count::Int
     children::Vector{Node}
@@ -84,6 +85,7 @@ get_stackframe(node::Node) = node.sf
 Node(node::Node, children::Vector{Node}) = Node(node.sf, node.count, children)
 Base.getindex(node::Node, i::Int) = node.children[i]
 Base.getindex(node::Node, i::Int, args...) = node[i][args...]
+Base.length(node::Node) = length(node.children)
 
 
 # This filter code was taken from TraceCalls.jl
@@ -94,7 +96,12 @@ filter_descendents(f, node) = # helper
 filter_(f, node) =
     (f(get_stackframe(node)) ? [Node(node, filter_descendents(f, node))] :
      filter_descendents(f, node))
-Base.filter(f::Function, node::Node) = Node(node, filter_descendents(f, node))
+Base.filter(f::Function, node::Node) =
+    # Apply f(::StackFrame)
+    Node(node, filter_descendents(f, node))
+Base.map(f::Function, node::Node) =
+    # Apply f(::Node), leaves first
+    f(Node(node, Node[map(f, child) for child in node.children]))
 
 prune(node::Node, i=0) =
     i<=0 ? Node(node, Node[]) : Node(node, Node[prune(n, i-1) for n in node.children])
@@ -196,140 +203,33 @@ function Base.show(io::IO, node::Node)
     end
 end
 
-function tree(bt::Vector{Vector{UInt64}}, counts::Vector{Int},
-              lidict::LineInfoFlatDict, level::Int, fmt::ProfileFormat, noisefloor::Int)
-    if level > fmt.maxdepth
-        return []::Any
-    end
-    # Organize backtraces into groups that are identical up to this level
-    if fmt.combine
-        # Combine based on the line information
-        d = Dict{StackFrame,Vector{Int}}()
-        for i = 1:length(bt)
-            ip = bt[i][level + 1]
-            key = lidict[ip]
-            indx = Base.ht_keyindex(d, key)
-            if haskey(d, key)
-                push!(d[key], i)
-            else
-                d[key] = [i]
-            end
-        end
-        # Generate counts
-        dlen = length(d)
-        lilist = Vector{StackFrame}(dlen)
-        group = Vector{Vector{Int}}(dlen)
-        n = Vector{Int}(dlen)
-        i = 1
-        for (key, v) in d
-            lilist[i] = key
-            group[i] = v
-            n[i] = sum(counts[v])
-            i += 1
-        end
-    else
-        # Combine based on the instruction pointer
-        d = Dict{UInt64,Vector{Int}}()
-        for i = 1:length(bt)
-            key = bt[i][level+1]
-            if haskey(d, key)
-                push!(d[key], i)
-            else
-                d[key] = [i]
-            end
-        end
-        # Generate counts, and do the code lookup
-        dlen = length(d)
-        lilist = Vector{StackFrame}(dlen)
-        group = Vector{Vector{Int}}(dlen)
-        n = Vector{Int}(dlen)
-        i = 1
-        for (key, v) in d
-            lilist[i] = lidict[key]
-            group[i] = v
-            n[i] = sum(counts[v])
-            i += 1
-        end
-    end
-    # Order the line information
-    if length(lilist) > 1
-        p = Profile.liperm(lilist)
-        lilist = lilist[p]
-        group = group[p]
-        n = n[p]
-    end
-    # Recurse to the next level
-    len = Int[length(x) for x in bt]
-    out = Node[]
-    for i = 1:length(lilist)
-        n[i] < fmt.mincount && continue
-        n[i] < noisefloor && continue
-        idx = group[i]
-        keep = len[idx] .> level+1
-        if any(keep)
-            idx = idx[keep]
-            children = tree(bt[idx], counts[idx], lidict, level + 1, fmt, fmt.noisefloor > 0 ? floor(Int, fmt.noisefloor * sqrt(n[i])) : 0)
-        else
-            children = []
-        end
-        push!(out, Node(lilist[i], n[i], children))
-    end
-    return out
-end
-
-function tree(data::Vector{UInt64}, lidict::LineInfoFlatDict, fmt::ProfileFormat)
-    if !fmt.C
-        data = purgeC(data, lidict)
-    end
-    bt, counts = tree_aggregate(data)
-    level = 0
-    len = Int[length(x) for x in bt]
-    keep = len .> 0
-    # Using UNKNOWN as the root works, but it should ideally be a different flag value...
-    # Or use a Nullable. - @cstjean
-    return Node(UNKNOWN, -1, tree(bt[keep], counts[keep], lidict, level, fmt, 0))
-end
-
-function tree(data::Vector, lidict::LineInfoDict, fmt::ProfileFormat)
-    newdata, newdict = flatten(data, lidict)
-    return tree(newdata, newdict, fmt)
-end
-
-"""
-    tree(pd::ProfileData; C = false, combine = true, maxdepth::Int = typemax(Int),
-         mincount::Int = 0, noisefloor = 0)
-
-Returns a tree view of the profiling data `pd`
-
-The keyword arguments can be any combination of:
-
- - `C` -- If `true`, backtraces from C and Fortran code are shown (normally they are excluded).
-
- - `combine` -- If `true` (default), instruction pointers are merged that correspond to the same line of code.
-
- - `maxdepth` -- Limits the depth higher than `maxdepth` in the `:tree` format.
-
- - `sortedby` -- Controls the order in `:flat` format. `:filefuncline` (default) sorts by the source
-    line, whereas `:count` sorts in order of number of collected samples.
-
- - `noisefloor` -- Limits frames that exceed the heuristic noise floor of the sample (only applies to format `:tree`).
-    A suggested value to try for this is 2.0 (the default is 0). This parameter hides samples for which `n <= noisefloor * √N`,
-    where `n` is the number of samples on this line, and `N` is the number of samples for the callee.
-
- - `mincount` -- Limits the printout to only those lines with at least `mincount` occurrences.
-"""
-function tree(pd::ProfileData;
-              C = false,
-              combine = true,
-              maxdepth::Int = typemax(Int),
+tree(pd::ProfileData; C = false, mincount::Int = 0, noisefloor = 0) =
+    tree(backtraces(pd; C=C); mincount=mincount, noisefloor=noisefloor)
+function tree(bt::BackTraces;
               mincount::Int = 0,
               noisefloor = 0)
-    tree(pd.data, pd.lidict, ProfileFormat(C = C,
-            combine = combine,
-            maxdepth = maxdepth,
-            mincount = mincount,
-            noisefloor = noisefloor))
+    root = FProfile.Node(FProfile.UNKNOWN, -1, [])
+    for (count, trace) in bt
+        node = root
+        for sf::StackFrame in trace
+            let sf=sf
+                i = findfirst(n->n.sf==sf, node.children)
+                if i == 0
+                    next_node = FProfile.Node(sf, count, FProfile.Node[])
+                    push!(node.children, next_node)
+                else
+                    next_node = node.children[i]
+                end
+                next_node.count += count
+                node = next_node
+            end
+        end
+    end
+    return map(n->Node(n, n.children[Profile.liperm(map(get_stackframe, n.children))]),
+               root)
 end
+
+include("tree_base.jl")
 
 ################################################################################
 # flat view
@@ -433,7 +333,13 @@ Returns aggregated profiling results as a `DataFrame`. Arguments:
  - `percent=true`: show percentages
  - `inlined=true`: whether to show inlined function calls
 """
-function flat(pd::ProfileData;
+flat(pd::ProfileData; C=false, combineby=:stackframe, percent=true, inlined=true,
+     # internal parameter
+     _module=nothing) =
+   flat(backtraces(pd; flatten=true, C=C); combineby=combineby,
+        percent=percent, inlined=inlined, _module=_module)
+
+function flat(btraces::BackTraces;
               C=false,
               combineby=:stackframe,
               percent=true,
@@ -446,7 +352,6 @@ function flat(pd::ProfileData;
     end
     @assert(haskey(symbol2accessor, combineby),
             "combineby must be one of $(collect(Base.keys(symbol2accessor)))")
-    btraces = backtraces(pd; flatten=true, C=C)
     count_dict = counts_from_traces(btraces, symbol2accessor[combineby])
     keys = collect(Base.keys(count_dict))
     @assert !isempty(keys) "ProfileData contains no applicable traces"
