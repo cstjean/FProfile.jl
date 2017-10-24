@@ -319,6 +319,7 @@ function tree(pd::ProfileData;
 end
 
 ################################################################################
+# flat view
 
 function counts_from_traces(backtraces::Vector, key::Function,
                             encountered_key::Function=key)
@@ -396,6 +397,8 @@ symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
                               :file=>get_file,
                               :function=>get_function,
                               :module=>get_module)
+
+
 
 function is_applicable(f::Function, object)
     try
