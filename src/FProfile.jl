@@ -81,21 +81,21 @@ get_module(m::Module) = m
 is_C_call(sf::StackFrame) = sf.from_c
 is_inlined(sf::StackFrame) = sf.inlined
 
-symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
-                              # The line is already part of :stackframe, and grouping
-                              # on :stackframe makes more sense anyway.
-                              #:line=>get_line,
-                              :specialization=>get_specialization,
-                              :method=>get_method,
-                              :file=>get_file,
-                              :function=>get_function,
-                              :module=>get_module)
-type2symbol_dict = Dict(StackFrame=>:stackframe,
-                        MethodInstance=>:specialization,
-                        Method=>:method,
-                        String=>:file,
-                        Function=>:function,
-                        Module=>:module)::Any
+const symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
+                                    # The line is already part of :stackframe, and
+                                    # grouping on :stackframe makes more sense anyway.
+                                    #:line=>get_line,
+                                    :specialization=>get_specialization,
+                                    :method=>get_method,
+                                    :file=>get_file,
+                                    :function=>get_function,
+                                    :module=>get_module)
+const type2symbol_dict = Dict(StackFrame=>:stackframe,
+                              MethodInstance=>:specialization,
+                              Method=>:method,
+                              String=>:file,
+                              Function=>:function,
+                              Module=>:module)::Any
 
 function type2symbol(T)
     for (typ, sym) in type2symbol_dict
@@ -167,12 +167,14 @@ mutable struct Node
     count::Int
     children::Vector{Node}
 end
-get_stackframe(node::Node) = node.sf
 Node(node::Node, children::Vector{Node}) = Node(node.sf, node.count, children)
 Base.getindex(node::Node, i::Int) = node.children[i]
 Base.getindex(node::Node, i::Int, args...) = node[i][args...]
 Base.length(node::Node) = length(node.children)
-
+for acc in (:get_stackframe, :get_specialization, :get_method, :get_file, :get_function,
+            :get_module)
+    @eval $acc(node::Node) = $acc(node.sf)
+end
 
 # This filter code was taken from TraceCalls.jl
 filter_descendents(f, node) = # helper
@@ -180,11 +182,9 @@ filter_descendents(f, node) = # helper
     isempty(node.children) ? Node[] : Node[n for child in node.children
                                            for n in filter_(f, child)]
 filter_(f, node) =
-    (f(get_stackframe(node)) ? [Node(node, filter_descendents(f, node))] :
+    (f(node) ? [Node(node, filter_descendents(f, node))] :
      filter_descendents(f, node))
-Base.filter(f::Function, node::Node) =
-    # Apply f(::StackFrame)
-    Node(node, filter_descendents(f, node))
+Base.filter(f::Function, node::Node) = Node(node, filter_descendents(f, node))
 Base.map(f::Function, node::Node) =
     # Apply f(::Node), leaves first
     f(Node(node, Node[map(f, child) for child in node.children]))
@@ -289,9 +289,18 @@ function Base.show(io::IO, node::Node)
     end
 end
 
-tree(pd::ProfileData; C = false, mincount::Int = 0, noisefloor = 0) =
-    tree(backtraces(pd; C=C); mincount=mincount, noisefloor=noisefloor)
-function tree(bt::BackTraces; mincount::Int = 0, noisefloor = 0)
+""" `tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1)` displays a tree
+of function calls, along with the number of backtraces going through each call.
+
+ - `C` -- If `true`, backtraces from C and Fortran code are shown (normally they are excluded).
+
+ - `maxdepth` -- Limits the depth higher than `maxdepth` in the `:tree` format.
+
+ - `mincount` -- Limits the printout to only those lines with at least `mincount` occurrences.
+"""
+tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1) =
+    tree(backtraces(pd; C=C); mincount=mincount, maxdepth=maxdepth)
+function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1)
     # We start with an empty Node tree, then iterate over every trace, adding counts and
     # new branches.
     root = FProfile.Node(FProfile.UNKNOWN, -1, [])
@@ -312,8 +321,12 @@ function tree(bt::BackTraces; mincount::Int = 0, noisefloor = 0)
         end
     end
     # Sort the children in each node alphabetically. See Profile.liperm.
-    return map(n->Node(n, n.children[Profile.liperm(map(get_stackframe, n.children))]),
+    root = map(n->Node(n, n.children[Profile.liperm(map(get_stackframe, n.children))]),
                root)
+    if maxdepth != -1
+        root = prune(root, maxdepth)
+    end
+    return filter(node->node.count >= mincount, root)
 end
 
 function tree(pd::ProfileData, object::T, neighborhood::UnitRange=-1:1; kwargs...) where T
