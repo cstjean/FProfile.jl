@@ -454,6 +454,6 @@ df_combineby(df::DataFrame) =
     names(df)[findfirst(n->haskey(symbol2accessor, n), names(df))]
 
 tree(pd::ProfileData, df::DataFrame, nrow::Int, neighborhood::UnitRange=-1:1) =
-    tree(pd, df[nrow, df_combineby(df)])
+    tree(pd, df[nrow, df_combineby(df)], neighborhood)
 
 end # module
