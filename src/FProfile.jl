@@ -224,49 +224,43 @@ function find_nodes(f::Function, node::Node)
     out
 end
 
-function Profile.tree_format(li::StackFrame, count::Int, level::Int, cols::Int,
-                             ndigcounts::Int, ndigline::Int)
-    # Very nearly the same code as in Base
-    nindent = min(cols>>1, level)
-    ntext = cols - nindent - ndigcounts - ndigline - 5
+function tree_line_string(li::StackFrame, count::Int, ndigcounts::Int, ntext::Int)
     widthfile = floor(Integer, 0.4ntext)
     widthfunc = floor(Integer, 0.6ntext)
-    showextra = false
-    if level > nindent
-        nextra = level - nindent
-        nindent -= ndigits(nextra) + 2
-        showextra = true
-    end
     if li != UNKNOWN
-        base = " "^nindent
-        if showextra
-            base = string(base, "+", nextra, " ")
-        end
         if li.line == li.pointer
-            str = string(base,
-                         rpad(string(count), ndigcounts, " "),
-                         " ",
-                         "unknown function (pointer: 0x",
-                         hex(li.pointer,2*sizeof(Ptr{Void})),
-                         ")")
+            return string("unknown function (pointer: 0x",
+                          hex(li.pointer,2*sizeof(Ptr{Void})),
+                          ")")
         else
             fname = string(li.func)
             if !li.from_c && !isnull(li.linfo)
                 fname = sprint(show_spec_linfo, li)
             end
-            str = string(base,
-                         rpad(string(count), ndigcounts, " "),
-                         " ",
-                         rtruncto(string(li.file), widthfile),
-                         ":",
-                         li.line == -1 ? "?" : string(li.line),
-                         "; ",
-                         ltruncto(fname, widthfunc))
+            return string(rtruncto(string(li.file), widthfile),
+                          ":",
+                          li.line == -1 ? "?" : string(li.line),
+                          "; ",
+                          ltruncto(fname, widthfunc))
         end
     else
-        str = ""
+        return nothing
     end
-    return str
+end
+
+function Profile.tree_format(obj, count::Int, level::Int, cols::Int,
+                             ndigcounts::Int, ndigline::Int)
+    nindent = min(cols>>1, level)
+    ntext = cols - nindent - ndigcounts - ndigline - 5
+    base = " "^nindent
+    if level > nindent
+        nextra = level - nindent
+        nindent -= ndigits(nextra) + 2
+        base = string(base, "+", nextra, " ")
+    end
+    base = string(base, rpad(string(count), ndigcounts, " "), " ")
+    line = tree_line_string(obj, count, ndigcounts, ntext)
+    return line === nothing ? nothing : base*line
 end
 
 function Base.show(io::IO, node::Node)
@@ -275,7 +269,7 @@ function Base.show(io::IO, node::Node)
     str = tree_format(node.sf, node.count, level, cols,
                       get(io, :profile_ndigcounts, ndigits(node.count)),
                       get(io, :profile_ndigline, tree_format_linewidth(node.sf)))
-    if !isempty(str) println(io, str) end
+    if str !== nothing println(io, str) end
     if !isempty(node.children)
         io2 = IOContext(io,
                         profile_tree_level=level+1,
