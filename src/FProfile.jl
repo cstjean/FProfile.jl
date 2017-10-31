@@ -81,15 +81,15 @@ get_module(m::Module) = m
 is_C_call(sf::StackFrame) = sf.from_c
 is_inlined(sf::StackFrame) = sf.inlined
 
-const symbol2accessor = OrderedDict(:stackframe=>get_stackframe,
-                                    # The line is already part of :stackframe, and
-                                    # grouping on :stackframe makes more sense anyway.
-                                    #:line=>get_line,
-                                    :specialization=>get_specialization,
-                                    :method=>get_method,
-                                    :file=>get_file,
-                                    :function=>get_function,
-                                    :module=>get_module)
+const symbol2accessor_dict = OrderedDict(:stackframe=>get_stackframe,
+                                         # The line is already part of :stackframe, and
+                                         # grouping on :stackframe makes more sense
+                                         # anyway.  :line=>get_line,
+                                         :specialization=>get_specialization,
+                                         :method=>get_method,
+                                         :file=>get_file,
+                                         :function=>get_function,
+                                         :module=>get_module)
 const type2symbol_dict = Dict(StackFrame=>:stackframe,
                               MethodInstance=>:specialization,
                               Method=>:method,
@@ -97,13 +97,19 @@ const type2symbol_dict = Dict(StackFrame=>:stackframe,
                               Function=>:function,
                               Module=>:module)::Any
 
+function symbol2accessor(sym::Symbol)
+    @assert(haskey(symbol2accessor_dict, sym),
+            "Invalid accessor/combiner: $sym. Must be one of $(collect(Base.keys(symbol2accessor_dict)))")
+    symbol2accessor_dict[sym]
+end
+
 function type2symbol(T)
     for (typ, sym) in type2symbol_dict
         if T <: typ; return sym; end
     end
     error("Can only handle objects of types $(collect(keys(type2symbol)))")
 end
-type2accessor(x::Type) = symbol2accessor[type2symbol(x)]
+type2accessor(x::Type) = symbol2accessor(type2symbol(x))
 
 ################################################################################
 # backtraces
@@ -294,7 +300,7 @@ of function calls, along with the number of backtraces going through each call.
 """
 tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1) =
     tree(backtraces(pd; C=C); mincount=mincount, maxdepth=maxdepth)
-function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1)
+function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1, combineby=:stackframe)
     # We start with an empty Node tree, then iterate over every trace, adding counts and
     # new branches.
     root = Node(UNKNOWN, -1, [])
@@ -417,9 +423,7 @@ function flat(btraces::BackTraces;
         # Because a function/file isn't uniquely associated to a module
         error("Cannot combineby $combineby if a module is provided; try `combineby=:method`")
     end
-    @assert(haskey(symbol2accessor, combineby),
-            "combineby must be one of $(collect(Base.keys(symbol2accessor)))")
-    count_dict = counts_from_traces(btraces, symbol2accessor[combineby])
+    count_dict = counts_from_traces(btraces, symbol2accessor(combineby))
     keys = collect(Base.keys(count_dict))
     @assert !isempty(keys) "ProfileData contains no applicable traces"
     ntrace = sum(first, btraces)
@@ -428,12 +432,12 @@ function flat(btraces::BackTraces;
          var => counts)
     count_cols = [perc(:count, [count_dict[sf] for sf in keys])]
     if _module !== nothing
-        end_count_dict = end_counts_from_traces(btraces, symbol2accessor[combineby],
+        end_count_dict = end_counts_from_traces(btraces, symbol2accessor(combineby),
                                                 sf->get_module(sf) in _module)
         push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
     end
     df = DataFrame(OrderedDict(count_cols...,
-                               [col=>map(f, keys) for (col, f) in symbol2accessor
+                               [col=>map(f, keys) for (col, f) in symbol2accessor_dict
                                 if is_applicable(f, first(keys))]...))
     if _module !== nothing; df = df[[m in _module for m in df[:module]], :] end
     if !inlined; df = df[!is_inlined.(df[:stackframe]), :] end
@@ -448,7 +452,7 @@ flat(pd::ProfileData, _module::Module; kwargs...) =
 
 """ `df_combineby(df::DataFrame)` returns by what this `df` was combined. """
 df_combineby(df::DataFrame) =
-    names(df)[findfirst(n->haskey(symbol2accessor, n), names(df))]
+    names(df)[findfirst(n->haskey(symbol2accessor_dict, n), names(df))]
 
 tree(pd::ProfileData, df::DataFrame, nrow::Int, neighborhood::UnitRange=-1:1) =
     tree(pd, df[nrow, df_combineby(df)], neighborhood)
