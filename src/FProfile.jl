@@ -224,7 +224,7 @@ function find_nodes(f::Function, node::Node)
     out
 end
 
-function tree_line_string(li::StackFrame, count::Int, ndigcounts::Int, ntext::Int)
+function tree_line_string(li::StackFrame, ntext::Int)
     widthfile = floor(Integer, 0.4ntext)
     widthfunc = floor(Integer, 0.6ntext)
     if li != UNKNOWN
@@ -259,7 +259,7 @@ function Profile.tree_format(obj, count::Int, level::Int, cols::Int,
         base = string(base, "+", nextra, " ")
     end
     base = string(base, rpad(string(count), ndigcounts, " "), " ")
-    line = tree_line_string(obj, count, ndigcounts, ntext)
+    line = tree_line_string(obj, ntext)
     return line === nothing ? nothing : base*line
 end
 
