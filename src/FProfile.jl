@@ -20,6 +20,18 @@ using DataStructures: OrderedDict, Accumulator, counter
 
 const BackTraces = Vector{Tuple{Int64,Vector{StackFrame}}}
 
+
+module MissingInfo   # placeholders
+missing_info() = nothing
+missing_info()  # call it to generate a specialization
+const missing_info_method_instance = let res=nothing
+    Base.visit(spec->(res=spec;), methods(missing_info).ms[1].specializations)
+    res
+end
+end
+using .MissingInfo: missing_info, missing_info_method_instance
+
+
 struct ProfileData  # a mere container for Base.Profile data
     data::Vector
     lidict::Profile.LineInfoDict
@@ -305,6 +317,7 @@ of function calls, along with the number of backtraces going through each call.
  - `maxdepth` -- Limits the depth higher than `maxdepth` in the `:tree` format.
 
  - `mincount` -- Limits the printout to only those lines with at least `mincount` occurrences.
+ - `combineby` -- Aggregate by `:specialization, :method, :file, :function`, or `:module`
 """
 tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1, combineby=:stackframe) =
     tree(backtraces(pd; C=C); mincount=mincount, maxdepth=maxdepth, combineby=combineby)
@@ -315,8 +328,13 @@ function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1, combineby=:stackfr
     root = Node(UNKNOWN, -1, [])
     for (count, trace) in bt
         node = root
+        prev_obj = nothing
         for sf in trace
             let obj=combiner(sf) # for speed - see #15276
+                if !(obj isa StackFrame) && prev_obj == obj
+                    continue
+                end
+                prev_obj = obj
                 # Speed note: now that Node.obj is untyped, this line might be a
                 # bottleneck.
                 i = findfirst(n->n.obj==obj, node.children)
@@ -386,13 +404,6 @@ function end_counts_from_traces(backtraces::Vector, key::Function, applicable::F
 end
 
 # -----------------------------------------------------------------------------
-
-missing_info() = nothing  # placeholder method
-missing_info()  # call it to generate a specialization
-const missing_info_method_instance = let res=nothing
-    Base.visit(spec->(res=spec;), methods(missing_info).ms[1].specializations)
-    res
-end
 
 
 function is_applicable(f::Function, object)
