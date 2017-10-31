@@ -307,9 +307,10 @@ function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1)
     for (count, trace) in bt
         node = root
         for sf::StackFrame in trace
-            let sf=sf
+            let sf=sf # for speed - see #15276
                 i = findfirst(n->n.sf==sf, node.children)
-                if i == 0 # make a new branch
+                if i == 0
+                    # Make a new branch
                     next_node = FProfile.Node(sf, 0, FProfile.Node[])
                     push!(node.children, next_node)
                 else
