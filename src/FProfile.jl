@@ -230,17 +230,21 @@ function find_nodes(f::Function, node::Node)
     out
 end
 
-function tree_line_string(li::StackFrame, ntext::Int)
+tree_line_string(obj, ntext::Int) = rtruncto(string(obj), ntext)
+
+function tree_line_string(li::Union{StackFrame, Method}, ntext::Int)
     widthfile = floor(Integer, 0.4ntext)
     widthfunc = floor(Integer, 0.6ntext)
     if li != UNKNOWN
-        if li.line == li.pointer
+        if li isa StackFrame && li.line == li.pointer
             return string("unknown function (pointer: 0x",
                           hex(li.pointer,2*sizeof(Ptr{Void})),
                           ")")
         else
-            fname = string(li.func)
-            if !li.from_c && !isnull(li.linfo)
+            fname = string(get_function(li))
+            if li isa Method
+                fname = sprint(Base.show_tuple_as_call, li.name, li.sig)
+            elseif !li.from_c && !isnull(li.linfo)
                 fname = sprint(show_spec_linfo, li)
             end
             return string(rtruncto(string(li.file), widthfile),
@@ -268,6 +272,10 @@ function Profile.tree_format(obj, count::Int, level::Int, cols::Int,
     line = tree_line_string(obj, ntext)
     return line === nothing ? nothing : base*line
 end
+
+# tree_format_linewidth is just the width of the line number, which is used to center
+# the printing and provide the most useful information. 0 is a cop-out; FIXME
+Base.Profile.tree_format_linewidth(x) = 0
 
 function Base.show(io::IO, node::Node)
     cols::Int = Base.displaysize(io)[2]
@@ -298,16 +306,17 @@ of function calls, along with the number of backtraces going through each call.
 
  - `mincount` -- Limits the printout to only those lines with at least `mincount` occurrences.
 """
-tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1) =
-    tree(backtraces(pd; C=C); mincount=mincount, maxdepth=maxdepth)
+tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1, combineby=:stackframe) =
+    tree(backtraces(pd; C=C); mincount=mincount, maxdepth=maxdepth, combineby=combineby)
 function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1, combineby=:stackframe)
     # We start with an empty Node tree, then iterate over every trace, adding counts and
     # new branches.
+    combiner = symbol2accessor(combineby)
     root = Node(UNKNOWN, -1, [])
     for (count, trace) in bt
         node = root
-        for obj in trace
-            let obj=obj # for speed - see #15276
+        for sf in trace
+            let obj=combiner(sf) # for speed - see #15276
                 # Speed note: now that Node.obj is untyped, this line might be a
                 # bottleneck.
                 i = findfirst(n->n.obj==obj, node.children)
@@ -324,8 +333,8 @@ function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1, combineby=:stackfr
         end
     end
     # Sort the children in each node alphabetically. See Profile.liperm.
-    root = map(n->Node(n, n.children[Profile.liperm(map(get_stackframe, n.children))]),
-               root)
+    # root = map(n->Node(n, n.children[Profile.liperm(map(n->n.obj, n.children))]),
+    #            root)
     if maxdepth != -1
         root = prune(root, maxdepth)
     end
