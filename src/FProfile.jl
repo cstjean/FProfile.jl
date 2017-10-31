@@ -160,20 +160,20 @@ end
 ################################################################################
 # tree view
 
-""" `Node(li::StackFrame, count::Int, children::Vector{Node})` represents the `tree`
-view of the profiling data. """
+""" `Node(object, count::Int, children::Vector{Node})` represents the `tree`
+view of the profiling data. `object` is a `StackFrame`, unless combineby is specified. """
 mutable struct Node
-    sf::StackFrame
+    obj
     count::Int
     children::Vector{Node}
 end
-Node(node::Node, children::Vector{Node}) = Node(node.sf, node.count, children)
+Node(node::Node, children::Vector{Node}) = Node(node.obj, node.count, children)
 Base.getindex(node::Node, i::Int) = node.children[i]
 Base.getindex(node::Node, i::Int, args...) = node[i][args...]
 Base.length(node::Node) = length(node.children)
 for acc in (:get_stackframe, :get_specialization, :get_method, :get_file, :get_function,
             :get_module)
-    @eval $acc(node::Node) = $acc(node.sf)
+    @eval $acc(node::Node) = $acc(node.obj)
 end
 
 # This filter code was taken from TraceCalls.jl
@@ -266,16 +266,16 @@ end
 function Base.show(io::IO, node::Node)
     cols::Int = Base.displaysize(io)[2]
     level = get(io, :profile_tree_level, 0)
-    str = tree_format(node.sf, node.count, level, cols,
+    str = tree_format(node.obj, node.count, level, cols,
                       get(io, :profile_ndigcounts, ndigits(node.count)),
-                      get(io, :profile_ndigline, tree_format_linewidth(node.sf)))
+                      get(io, :profile_ndigline, tree_format_linewidth(node.obj)))
     if str !== nothing println(io, str) end
     if !isempty(node.children)
         io2 = IOContext(io,
                         profile_tree_level=level+1,
                         profile_ndigcounts=maximum(ndigits(child.count)
                                                    for child in node.children),
-                        profile_ndigline=maximum(tree_format_linewidth(child.sf)
+                        profile_ndigline=maximum(tree_format_linewidth(child.obj)
                                                  for child in node.children))
         for c in node.children
             show(io2, c)
@@ -300,12 +300,14 @@ function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1)
     root = Node(UNKNOWN, -1, [])
     for (count, trace) in bt
         node = root
-        for sf::StackFrame in trace
-            let sf=sf # for speed - see #15276
-                i = findfirst(n->n.sf==sf, node.children)
+        for obj in trace
+            let obj=obj # for speed - see #15276
+                # Speed note: now that Node.obj is untyped, this line might be a
+                # bottleneck.
+                i = findfirst(n->n.obj==obj, node.children)
                 if i == 0
                     # Make a new branch
-                    next_node = Node(sf, 0, Node[])
+                    next_node = Node(obj, 0, Node[])
                     push!(node.children, next_node)
                 else
                     next_node = node.children[i]
