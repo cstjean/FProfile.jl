@@ -297,7 +297,7 @@ tree(pd::ProfileData; C = false, mincount::Int = 0, maxdepth=-1) =
 function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1)
     # We start with an empty Node tree, then iterate over every trace, adding counts and
     # new branches.
-    root = FProfile.Node(FProfile.UNKNOWN, -1, [])
+    root = Node(UNKNOWN, -1, [])
     for (count, trace) in bt
         node = root
         for sf::StackFrame in trace
@@ -305,7 +305,7 @@ function tree(bt::BackTraces; mincount::Int = 0, maxdepth=-1)
                 i = findfirst(n->n.sf==sf, node.children)
                 if i == 0
                     # Make a new branch
-                    next_node = FProfile.Node(sf, 0, FProfile.Node[])
+                    next_node = Node(sf, 0, Node[])
                     push!(node.children, next_node)
                 else
                     next_node = node.children[i]
