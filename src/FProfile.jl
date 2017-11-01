@@ -390,7 +390,7 @@ function counts_from_traces(backtraces::Vector, key::Function,
     return counts
 end
 
-function end_counts_from_traces(backtraces::Vector, key::Function, applicable::Function)
+function self_counts_from_traces(backtraces::Vector, key::Function, applicable::Function)
     counts = Dict()
     for (trace_count, trace) in backtraces
         for sf in @view trace[end:-1:1]
@@ -453,9 +453,9 @@ function flat(btraces::BackTraces;
          var => counts)
     count_cols = [perc(:count, [count_dict[sf] for sf in keys])]
     if _module !== nothing
-        end_count_dict = end_counts_from_traces(btraces, symbol2accessor(combineby),
+        self_count_dict = self_counts_from_traces(btraces, symbol2accessor(combineby),
                                                 sf->get_module(sf) in _module)
-        push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
+        push!(count_cols, perc(:self, [get(self_count_dict, sf, 0) for sf in keys]))
     end
     df = DataFrame(OrderedDict(count_cols..., combineby=>keys))
                                # Use this code to add all the remaining columns
