@@ -457,10 +457,11 @@ function flat(btraces::BackTraces;
                                                 sf->get_module(sf) in _module)
         push!(count_cols, perc(:end_count, [get(end_count_dict, sf, 0) for sf in keys]))
     end
-    df = DataFrame(OrderedDict(count_cols...,
-                               [col=>map(f, keys) for (col, f) in symbol2accessor_dict
-                                if is_applicable(f, first(keys))]...))
-    if _module !== nothing; df = df[[m in _module for m in df[:module]], :] end
+    df = DataFrame(OrderedDict(count_cols..., combineby=>keys))
+                               # Use this code to add all the remaining columns
+                               # [col=>map(f, keys) for (col, f) in symbol2accessor_dict
+                               #  if is_applicable(f, first(keys))]...))
+    if _module !== nothing; df = df[[get_module(obj) in _module for obj in df[combineby]], :] end
     if !inlined; df = df[!is_inlined.(df[:stackframe]), :] end
     return sort(df, cols=percent ? :count_pct : :count, rev=true)
 end
