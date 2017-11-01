@@ -448,7 +448,7 @@ function flat(btraces::BackTraces;
     @assert !isempty(keys) "ProfileData contains no applicable traces"
     ntrace = sum(first, btraces)
     perc(var::Symbol, counts) =
-        (percent ? Symbol(var, "_percent") => round.(counts ./ ntrace * 100, 2) :
+        (percent ? Symbol(var, "_pct") => round.(counts ./ ntrace * 100, 2) :
          var => counts)
     count_cols = [perc(:count, [count_dict[sf] for sf in keys])]
     if _module !== nothing
@@ -461,12 +461,11 @@ function flat(btraces::BackTraces;
                                 if is_applicable(f, first(keys))]...))
     if _module !== nothing; df = df[[m in _module for m in df[:module]], :] end
     if !inlined; df = df[!is_inlined.(df[:stackframe]), :] end
-    return sort(df, cols=percent ? :count_percent : :count, rev=true)
+    return sort(df, cols=percent ? :count_pct : :count, rev=true)
 end
 
 flat(pd::ProfileData, _module::Tuple; kwargs...) = 
     flat(pd; kwargs..., _module=_module)
-
 flat(pd::ProfileData, _module::Module; kwargs...) = 
     flat(pd; kwargs..., _module=(_module,))
 
@@ -476,5 +475,43 @@ df_combineby(df::DataFrame) =
 
 tree(pd::ProfileData, df::DataFrame, nrow::Int, neighborhood::UnitRange=-1:1) =
     tree(pd, df[nrow, df_combineby(df)], neighborhood)
+
+################################################################################
+# Comparisons
+
+function my_outer_join(df1, df2, on::Vector)
+    # See DataFrames.jl#1270 for why this is necessary
+    kept = setdiff(names(df1), on)
+    row_vals(df, i) = map(last, DataFrameRow(df, i))
+    mk_dict(df) = Dict(row_vals(df, i)=>i for i in 1:size(df, 1))
+    dict1 = mk_dict(df1[:, on])
+    dict2 = mk_dict(df2[:, on])
+    df_keys = unique(vcat(df1, df2)[on])
+    build_col(df, dict, col) = [haskey(dict, row_vals(df_keys, i)) ?
+                                df[dict[row_vals(df_keys, i)], col] : 0
+                                for i in 1:size(df_keys, 1)]
+    df_kept = DataFrame()
+    for col in kept
+        col1, col2 = Symbol(col, :_1), Symbol(col, :_2)
+        df_kept[col1] = build_col(df1, dict1, col)
+        df_kept[col2] = build_col(df2, dict2, col)
+        df_kept[Symbol(col, :_diff)] = round.(df_kept[col2] .- df_kept[col1], 2)
+    end
+    return hcat(df_kept, df_keys)
+end
+
+
+function flat(pd1::ProfileData, pd2::ProfileData; _module=nothing, kwargs...)
+    df1 = flat(pd1; _module=_module, kwargs...)
+    df2 = flat(pd2; _module=_module, kwargs...)
+    combineby_ind = _module === nothing ? 2 : 3
+    df = FProfile.my_outer_join(df1, df2, names(df1)[combineby_ind:end])
+    return sort(df, cols=names(df)[3], by=abs, rev=true)::Any
+end
+
+flat(pd1::ProfileData, pd2::ProfileData, _module::Tuple; kwargs...) = 
+    flat(pd1, pd2; kwargs..., _module=_module)
+flat(pd1::ProfileData, pd2::ProfileData, _module::Module; kwargs...) = 
+    flat(pd1, pd2; kwargs..., _module=(_module,))
 
 end # module
