@@ -71,16 +71,17 @@ end
 ################################################################################
 # Accessor functions
 
-get_line(obj) = get_stackframe(obj).line
-get_file(obj) = get_method(obj).file
-get_specialization(obj) = get(get_stackframe(obj).linfo, missing_info_method_instance)
-get_method(obj) = get_specialization(obj).def
-function get_function(sf)
+get_line(obj)::Int = get_stackframe(obj).line
+get_file(obj)::String = get_method(obj).file
+get_specialization(obj)::MethodInstance =
+    get(get_stackframe(obj).linfo, missing_info_method_instance)
+get_method(obj)::Method = get_specialization(obj).def
+function get_function(sf)::Function
     met = get_method(sf)
     ftype = fieldtype(met.sig, 1)
     return isdefined(ftype, :instance) ? ftype.instance : missing_info
 end
-get_module(obj) = get_method(obj).module
+get_module(obj)::Module = get_method(obj).module
 
 get_stackframe(sf::StackFrame) = sf
 get_specialization(mi::MethodInstance) = mi
