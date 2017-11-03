@@ -17,6 +17,7 @@ using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
     rtruncto, ltruncto, tree_format_linewidth, count_flat, parse_flat, flatten
 using DataFrames
 using DataStructures: OrderedDict, Accumulator, counter
+using Requires
 
 const BackTraces = Vector{Tuple{Int64,Vector{StackFrame}}}
 
@@ -515,5 +516,13 @@ flat(pd1::ProfileData, pd2::ProfileData, _module::Tuple; kwargs...) =
     flat(pd1, pd2; kwargs..., _module=_module)
 flat(pd1::ProfileData, pd2::ProfileData, _module::Module; kwargs...) = 
     flat(pd1, pd2; kwargs..., _module=(_module,))
+
+################################################################################
+# ProfileView
+
+@require ProfileView begin
+ProfileView.view(pd::ProfileData; kwargs...) =
+    ProfileView.view(pd.data; lidict=pd.lidict, kwargs...)
+end
 
 end # module
