@@ -9,6 +9,12 @@
 FProfile.jl provides more fully-featured reports for Julia's [sampling
 profiler](https://docs.julialang.org/en/latest/manual/profile/). 
 
+# Installation
+
+```julia
+Pkg.add("FProfile")
+```
+
 # Manual
 
 [User manual](http://nbviewer.jupyter.org/github/cstjean/FProfile.jl/blob/master/Manual.ipynb)

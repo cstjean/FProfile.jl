@@ -32,7 +32,6 @@ end
 end
 using .MissingInfo: missing_info, missing_info_method_instance
 
-
 struct ProfileData  # a mere container for Base.Profile data
     data::Vector
     lidict::Profile.LineInfoDict
