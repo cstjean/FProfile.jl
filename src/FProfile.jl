@@ -463,7 +463,7 @@ function flat(btraces::BackTraces;
                                #  if is_applicable(f, first(keys))]...))
     if _module !== nothing; df = df[[get_module(obj) in _module for obj in df[combineby]], :] end
     if !inlined; df = df[!is_inlined.(df[:stackframe]), :] end
-    return sort(df, cols=percent ? :count_pct : :count, rev=true)
+    return sort(df, percent ? :count_pct : :count, rev=true)
 end
 
 flat(pd::ProfileData, _module::Tuple; kwargs...) = 
