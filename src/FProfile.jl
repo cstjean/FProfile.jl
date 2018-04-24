@@ -508,7 +508,7 @@ function flat(pd1::ProfileData, pd2::ProfileData; _module=nothing, kwargs...)
     df2 = flat(pd2; _module=_module, kwargs...)
     combineby_ind = _module === nothing ? 2 : 3
     df = FProfile.my_outer_join(df1, df2, names(df1)[combineby_ind:end])
-    return sort(df, cols=names(df)[3], rev=true)
+    return sort(df, names(df)[3], rev=true)
 end
 
 flat(pd1::ProfileData, pd2::ProfileData, _module::Tuple; kwargs...) = 
