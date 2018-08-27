@@ -10,10 +10,10 @@ export @fprofile, backtraces, tree, flat
 export get_stackframe, get_method, get_specialization, get_file, get_function, get_module,
        is_C_call, is_inlined, filter_bloodline, prune, details
 
-using Base: Profile
+using Profile
 using Base.Core: MethodInstance
-using Base.Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
-    tree_aggregate, flatten, purgeC, tree_format, UNKNOWN, show_spec_linfo,
+using Profile: ProfileFormat, LineInfoFlatDict, LineInfoDict, StackFrame,
+    flatten, purgeC, tree_format, UNKNOWN, show_spec_linfo,
     rtruncto, ltruncto, tree_format_linewidth, count_flat, parse_flat, flatten
 using DataFrames
 using DataStructures: OrderedDict, Accumulator, counter
